@@ -1,4 +1,5 @@
 #include "kernel/console.h"
+#include "kernel/initramfs.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/memory_layout.h"
@@ -15,6 +16,8 @@ static void shell_print_help(void)
 {
     kprintf("help\n");
     kprintf("version\n");
+    kprintf("ls\n");
+    kprintf("cat <file>\n");
     kprintf("mem\n");
     kprintf("uptime\n");
     kprintf("ticks\n");
@@ -80,6 +83,68 @@ static void shell_print_ticks(void)
     kprintf("ticks: %u\n", (unsigned int)timer_irq_count());
 }
 
+static int shell_starts_with(const char *text, const char *prefix)
+{
+    while (*prefix != '\0')
+    {
+        if (*text != *prefix)
+        {
+            return 0;
+        }
+
+        text++;
+        prefix++;
+    }
+
+    return 1;
+}
+
+static const char *shell_skip_spaces(const char *text)
+{
+    while (*text == ' ')
+    {
+        text++;
+    }
+
+    return text;
+}
+
+static void shell_list_files(void)
+{
+    initramfs_list();
+}
+
+static void shell_cat_file(const char *name)
+{
+    const struct initramfs_file *file;
+    const unsigned char *data;
+    unsigned long i;
+
+    if (*name == '\0')
+    {
+        kprintf("usage: cat <file>\n");
+        return;
+    }
+
+    file = initramfs_find(name);
+    if (file == 0)
+    {
+        kprintf("file not found: %s\n", name);
+        return;
+    }
+
+    data = initramfs_read(file);
+    for (i = 0; i < file->size; i++)
+    {
+        console_putc((char)data[i]);
+    }
+
+    if (file->size == 0 || data[file->size - 1] != '\n')
+    {
+        console_putc('\n');
+    }
+}
+
 static void shell_run_command(const char *line)
 {
     if (strcmp(line, "") == 0)
@@ -96,6 +161,12 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "version") == 0)
     {
         shell_print_version();
+        return;
+    }
+
+    if (strcmp(line, "ls") == 0)
+    {
+        shell_list_files();
         return;
     }
 
@@ -120,6 +191,12 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "panic") == 0)
     {
         panic("panic command");
+    }
+
+    if (shell_starts_with(line, "cat"))
+    {
+        shell_cat_file(shell_skip_spaces(line + 3));
+        return;
     }
 
     kprintf("unknown command: %s\n", line);

@@ -10,6 +10,7 @@ Current state:
 - Writes log messages over PL011 UART
 - Supports polling-based PL011 UART input
 - Provides tiny UART shell
+- Embeds tiny read-only initramfs image
 - Installs minimal EL1 exception vector table when booted at EL1
 - Enables minimal EL1 MMU identity mapping
 - Handles periodic EL1 physical timer interrupts through QEMU `virt` GICv2
@@ -31,6 +32,7 @@ Tested on Ubuntu with:
 - `make`
 - `aarch64-linux-gnu-gcc`
 - `aarch64-linux-gnu-objcopy`
+- `python3`
 - `qemu-system-aarch64`
 
 On Debian or Ubuntu:
@@ -214,3 +216,4 @@ continue
 - [QEMU notes](docs/qemu.md)
 - [Roadmap](docs/roadmap.md)
 - [Coding style](docs/coding-style.md)
+- [Initramfs](docs/initramfs.md)

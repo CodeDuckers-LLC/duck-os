@@ -68,6 +68,11 @@ static struct task *task_pick_next(void)
     return 0;
 }
 
+static void task_mark_finished(struct task *task)
+{
+    task->state = TASK_FINISHED;
+}
+
 static void task_prepare_stack(struct task *task)
 {
     struct exception_trap_frame *frame;
@@ -89,7 +94,7 @@ static void task_prepare_stack(struct task *task)
 static void task_trampoline(void)
 {
     current_task->entry(current_task->arg);
-    current_task->state = TASK_FINISHED;
+    task_mark_finished(current_task);
     task_yield();
     panic("task returned after finish");
 }
@@ -194,6 +199,40 @@ struct exception_trap_frame *task_schedule_from_exception(struct exception_trap_
     if (current_can_continue && previous_task->state == TASK_RUNNING)
     {
         previous_task->state = TASK_READY;
+    }
+
+    next_task->state = TASK_RUNNING;
+    current_task = next_task;
+    return (struct exception_trap_frame *)next_task->sp;
+}
+
+struct exception_trap_frame *task_exit_from_exception(struct exception_trap_frame *frame,
+                                                      unsigned long status)
+{
+    struct task *previous_task;
+    struct task *next_task;
+
+    (void)status;
+
+    task_init();
+
+    previous_task = current_task;
+    previous_task->sp = (unsigned long)frame;
+
+    if (previous_task == &kernel_task)
+    {
+        frame->x[0] = status;
+        return frame;
+    }
+
+    task_mark_finished(previous_task);
+
+    next_task = task_pick_next();
+    if (next_task == 0)
+    {
+        kernel_task.state = TASK_RUNNING;
+        current_task = &kernel_task;
+        return (struct exception_trap_frame *)kernel_task.sp;
     }
 
     next_task->state = TASK_RUNNING;

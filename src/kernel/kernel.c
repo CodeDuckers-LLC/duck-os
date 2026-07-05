@@ -4,13 +4,14 @@
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/cpu.h"
 #include "kernel/console.h"
+#include "kernel/initramfs.h"
 #include "kernel/klog.h"
 #include "kernel/shell.h"
 #include "kernel/test.h"
 #include "kernel/task.h"
 #include "kernel/timer.h"
-#include "mm/pmm.h"
 #include "platform/platform.h"
+#include "mm/pmm.h"
 
 static void print_hex32(unsigned long value)
 {
@@ -58,6 +59,7 @@ void kernel_main(void)
     timer_init();
     mmu_init();
     pmm_init();
+    initramfs_init();
     task_init();
     test_run_all();
 

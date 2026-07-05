@@ -29,6 +29,8 @@ unsigned long task_active_count(void);
 unsigned long task_time_slice_ticks(void);
 struct exception_trap_frame *task_schedule_from_exception(struct exception_trap_frame *frame,
                                                           int current_can_continue);
+struct exception_trap_frame *task_exit_from_exception(struct exception_trap_frame *frame,
+                                                      unsigned long status);
 void task_run_preemptive_demo(void);
 void arch_context_switch(unsigned long *old_sp, unsigned long *new_sp);
 

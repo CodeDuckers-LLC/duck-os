@@ -3,6 +3,7 @@
 #include "arch/aarch64/sysreg.h"
 #include "kernel/klog.h"
 #include "kernel/panic.h"
+#include "kernel/syscall.h"
 #include "kernel/task.h"
 #include "kernel/timer.h"
 
@@ -312,6 +313,7 @@ struct exception_trap_frame *exception_handle(struct exception_trap_frame *frame
 {
     unsigned long ec;
     unsigned long iss;
+    unsigned long svc_imm;
 
     if (exception_is_irq_vector(frame->vector_id))
     {
@@ -320,9 +322,15 @@ struct exception_trap_frame *exception_handle(struct exception_trap_frame *frame
 
     ec = (frame->esr_el1 >> 26) & 0x3f;
     iss = frame->esr_el1 & 0x01ffffff;
-    if (ec == 0x15 && (iss & 0xffffUL) == 0)
+    svc_imm = iss & 0xffffUL;
+
+    if (ec == 0x15 && svc_imm == 0)
     {
         return task_schedule_from_exception(frame, 1);
+    }
+    if (ec == 0x15 && svc_imm == 1)
+    {
+        return syscall_handle(frame);
     }
 
     exception_handle_default(frame);

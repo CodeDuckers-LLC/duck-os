@@ -56,11 +56,12 @@ Current kernel treats `__kernel_end` as first free physical address after linked
 5. Reads and prints generic timer frequency.
 6. Builds simple identity-mapped EL1 page tables and enables MMU.
 7. Initializes physical memory manager and prints page usage.
-8. Runs boot self-tests, including `.bss`, exception install, MMU, memory layout, allocators, and timer polling checks.
-9. Optionally triggers deliberate `brk` exception in dedicated exception-test build.
-10. Initializes QEMU `virt` GICv2.
-11. Programs EL1 physical timer for 1 second periodic interrupts.
-12. Unmasks IRQs and enters UART shell loop.
+8. Parses embedded initramfs image.
+9. Runs boot self-tests, including `.bss`, exception install, MMU, memory layout, allocators, initramfs, and timer polling checks.
+10. Optionally triggers deliberate `brk` exception in dedicated exception-test build.
+11. Initializes QEMU `virt` GICv2.
+12. Programs EL1 physical timer for 1 second periodic interrupts.
+13. Unmasks IRQs and enters UART shell loop.
 
 No device tree parsing, advanced virtual memory layout, or broad device interrupt support exists yet.
 Current MMU setup is intentionally minimal:

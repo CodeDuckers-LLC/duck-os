@@ -50,6 +50,19 @@ void console_write(const char *str)
     spin_unlock_irqrestore(&console_lock, flags);
 }
 
+void console_write_len(const char *buffer, unsigned long length)
+{
+    unsigned long flags;
+    unsigned long i;
+
+    flags = spin_lock_irqsave(&console_lock);
+    for (i = 0; i < length; i++)
+    {
+        console_putc_unlocked(buffer[i]);
+    }
+    spin_unlock_irqrestore(&console_lock, flags);
+}
+
 unsigned long console_read_line(char *buffer, unsigned long max_len)
 {
     unsigned long length;

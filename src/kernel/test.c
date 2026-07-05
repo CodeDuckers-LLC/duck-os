@@ -5,12 +5,15 @@
 #include "arch/aarch64/sysreg.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
+#include "kernel/initramfs.h"
 #include "kernel/memory_layout.h"
 #include "kernel/panic.h"
 #include "kernel/spinlock.h"
+#include "kernel/syscall.h"
 #include "kernel/task.h"
 #include "kernel/test.h"
 #include "kernel/timer.h"
+#include "kernel/user.h"
 #include "lib/string.h"
 #include "mm/pmm.h"
 #include "platform/platform.h"
@@ -19,6 +22,7 @@ static unsigned long test_count;
 static unsigned long test_pass_count;
 static unsigned long task_demo_counter_a;
 static unsigned long task_demo_counter_b;
+static unsigned long syscall_exit_counter;
 
 static unsigned long bss_test_word;
 static unsigned char bss_test_buffer[16];
@@ -223,6 +227,62 @@ static void test_spinlock(void)
     test_assert(sysreg_read_daif() == saved_daif, "spin_unlock_irqrestore restores DAIF");
 }
 
+static void syscall_exit_task(void *arg)
+{
+    (void)arg;
+
+    syscall_exit_counter++;
+    syscall_exit(7);
+    syscall_exit_counter = 99;
+}
+
+static void test_syscalls(void)
+{
+    static const char message[] = "[TEST] INFO: syscall write console\n";
+    struct task *task;
+    unsigned long spins;
+
+    test_assert(syscall_write_console(message, sizeof(message) - 1) == (sizeof(message) - 1),
+                "syscall write console");
+    test_assert(syscall_get_ticks() == timer_irq_count(), "syscall get ticks");
+
+    syscall_exit_counter = 0;
+    task = task_create("syscall-exit", syscall_exit_task, 0);
+    test_assert(task != 0, "syscall exit task create");
+
+    spins = 0;
+    while (task_active_count() != 0 && spins < 16)
+    {
+        task_yield();
+        spins++;
+    }
+
+    test_assert(task_active_count() == 0, "syscall exit task complete");
+    test_assert(syscall_exit_counter == 1, "syscall exit stops task");
+}
+
+static void test_user_mode(void)
+{
+    test_assert(user_run_demo() == 0, "EL0 user demo");
+}
+
+static void test_initramfs(void)
+{
+    const struct initramfs_file *file;
+    const unsigned char *data;
+
+    test_assert(initramfs_file_count() >= 2, "initramfs file count");
+
+    file = initramfs_find("hello.txt");
+    test_assert(file != 0, "initramfs find hello.txt");
+    test_assert(file->size == 21, "initramfs hello.txt size");
+
+    data = initramfs_read(file);
+    test_assert(data != 0, "initramfs read hello.txt");
+    test_assert(memcmp(data, "hello from initramfs\n", file->size) == 0,
+                "initramfs hello.txt contents");
+}
+
 static void task_demo_printer(void *arg)
 {
     unsigned long i;
@@ -383,6 +443,9 @@ void test_run_all(void)
     test_kmalloc();
     test_pmm();
     test_spinlock();
+    test_syscalls();
+    test_user_mode();
+    test_initramfs();
     test_tasks();
     test_timer();
     test_kprintf_smoke();

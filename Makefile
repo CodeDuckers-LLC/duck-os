@@ -3,6 +3,7 @@ CROSS_COMPILE := aarch64-linux-gnu-
 CC := $(CROSS_COMPILE)gcc
 LD := $(CROSS_COMPILE)ld
 OBJCOPY := $(CROSS_COMPILE)objcopy
+PYTHON ?= python3
 
 BUILD_DIR := build
 
@@ -17,21 +18,27 @@ OBJS := \
 	$(BUILD_DIR)/arch/aarch64/gic.o \
 	$(BUILD_DIR)/arch/aarch64/context_switch.o \
 	$(BUILD_DIR)/arch/aarch64/mmu.o \
+	$(BUILD_DIR)/arch/aarch64/user_enter.o \
 	$(BUILD_DIR)/drivers/uart_pl011.o \
 	$(BUILD_DIR)/platform/qemu_virt/platform.o \
 	$(BUILD_DIR)/kernel/console.o \
 	$(BUILD_DIR)/kernel/kernel.o \
 	$(BUILD_DIR)/kernel/klog.o \
 	$(BUILD_DIR)/kernel/kmalloc.o \
+	$(BUILD_DIR)/kernel/initramfs.o \
 	$(BUILD_DIR)/kernel/memory_layout.o \
 	$(BUILD_DIR)/kernel/panic.o \
 	$(BUILD_DIR)/kernel/shell.o \
 	$(BUILD_DIR)/kernel/spinlock.o \
+	$(BUILD_DIR)/kernel/syscall.o \
 	$(BUILD_DIR)/kernel/task.o \
 	$(BUILD_DIR)/kernel/test.o \
 	$(BUILD_DIR)/kernel/timer.o \
+	$(BUILD_DIR)/kernel/user.o \
 	$(BUILD_DIR)/mm/pmm.o \
-	$(BUILD_DIR)/lib/string.o
+	$(BUILD_DIR)/lib/string.o \
+	$(BUILD_DIR)/user/hello_blob.o \
+	$(BUILD_DIR)/initramfs_blob.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
@@ -71,6 +78,10 @@ $(BUILD_DIR)/arch/aarch64/mmu.o: src/arch/aarch64/mmu.c include/arch/aarch64/gic
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/arch/aarch64/user_enter.o: src/arch/aarch64/user_enter.S | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/drivers/uart_pl011.o: src/drivers/uart_pl011.c include/drivers/uart.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -88,6 +99,10 @@ $(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h inc
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel/klog.o: src/kernel/klog.c include/kernel/console.h include/kernel/klog.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel/initramfs.o: src/kernel/initramfs.c include/kernel/initramfs.h include/kernel/klog.h include/kernel/panic.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -111,6 +126,10 @@ $(BUILD_DIR)/kernel/spinlock.o: src/kernel/spinlock.c include/arch/aarch64/sysre
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/kernel/syscall.o: src/kernel/syscall.c include/arch/aarch64/exceptions.h include/kernel/console.h include/kernel/syscall.h include/kernel/task.h include/kernel/timer.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/kernel/task.o: src/kernel/task.c include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/panic.h include/kernel/task.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -123,6 +142,10 @@ $(BUILD_DIR)/kernel/timer.o: src/kernel/timer.c include/arch/aarch64/sysreg.h in
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/kernel/user.o: src/kernel/user.c include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/panic.h include/kernel/user.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/mm/pmm.o: src/mm/pmm.c include/kernel/klog.h include/kernel/memory_layout.h include/kernel/panic.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -130,6 +153,25 @@ $(BUILD_DIR)/mm/pmm.o: src/mm/pmm.c include/kernel/klog.h include/kernel/memory_
 $(BUILD_DIR)/lib/string.o: src/lib/string.c include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user/hello.o: src/user/hello.S | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/user/hello.elf: $(BUILD_DIR)/user/hello.o src/user/user.ld
+	$(LD) -T src/user/user.ld -nostdlib $(BUILD_DIR)/user/hello.o -o $@
+
+$(BUILD_DIR)/user/hello.bin: $(BUILD_DIR)/user/hello.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BUILD_DIR)/user/hello_blob.o: $(BUILD_DIR)/user/hello.bin
+	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
+
+$(BUILD_DIR)/initramfs.img: tools/mkinitramfs.py initramfs/hello.txt initramfs/motd.txt | $(BUILD_DIR)
+	$(PYTHON) tools/mkinitramfs.py $@ initramfs/hello.txt initramfs/motd.txt
+
+$(BUILD_DIR)/initramfs_blob.o: $(BUILD_DIR)/initramfs.img
+	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
