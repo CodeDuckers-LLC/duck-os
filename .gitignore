@@ -1,0 +1,11 @@
+build/
+
+# Editors and local tooling
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Debugger history
+.gdb_history
