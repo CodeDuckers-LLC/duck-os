@@ -3,6 +3,7 @@
 #include "arch/aarch64/sysreg.h"
 #include "kernel/klog.h"
 #include "kernel/panic.h"
+#include "kernel/task.h"
 #include "kernel/timer.h"
 
 extern char exception_vector_table[];
@@ -34,6 +35,23 @@ static const char *exception_vector_name(unsigned long vector_id)
     }
 
     return "unknown";
+}
+
+static const char *exception_kind_name(unsigned long vector_id)
+{
+    switch (vector_id & 0x3UL)
+    {
+    case 0:
+        return "sync";
+    case 1:
+        return "irq";
+    case 2:
+        return "fiq";
+    case 3:
+        return "serror";
+    default:
+        return "unknown";
+    }
 }
 
 static const char *exception_class_name(unsigned long ec)
@@ -239,35 +257,39 @@ void exceptions_trigger_test(void)
     asm volatile("brk #0x42");
 }
 
-static void exception_handle_irq(struct exception_trap_frame *frame)
+static struct exception_trap_frame *exception_handle_irq(struct exception_trap_frame *frame)
 {
     unsigned int irq_id;
-
-    (void)frame;
 
     irq_id = gic_acknowledge_irq();
     irq_id &= 0x3ffU;
 
     if (irq_id >= 1020U)
     {
-        return;
+        return frame;
     }
 
     if (irq_id == GIC_IRQ_TIMER_PHYSICAL_PPI)
     {
         timer_handle_irq();
         gic_end_irq(irq_id);
-        return;
+        if ((timer_irq_count() % task_time_slice_ticks()) == 0)
+        {
+            return task_schedule_from_exception(frame, 1);
+        }
+        return frame;
     }
 
     kprintf("[ERROR] unexpected IRQ: %u\n", irq_id);
     gic_end_irq(irq_id);
     panic("Unhandled IRQ");
+    return frame;
 }
 
 static void exception_handle_default(struct exception_trap_frame *frame)
 {
     kprintf("[ERROR] exception: %s\n", exception_vector_name(frame->vector_id));
+    kprintf("[ERROR] type: %s\n", exception_kind_name(frame->vector_id));
     kprintf("[ERROR] vector: %u\n", (unsigned int)frame->vector_id);
     kprintf("[ERROR] ESR_EL1: 0x%x\n", (unsigned int)frame->esr_el1);
     exception_print_esr_details(frame->esr_el1);
@@ -286,13 +308,23 @@ static void exception_handle_default(struct exception_trap_frame *frame)
     panic("Unhandled exception");
 }
 
-void exception_handle(struct exception_trap_frame *frame)
+struct exception_trap_frame *exception_handle(struct exception_trap_frame *frame)
 {
+    unsigned long ec;
+    unsigned long iss;
+
     if (exception_is_irq_vector(frame->vector_id))
     {
-        exception_handle_irq(frame);
-        return;
+        return exception_handle_irq(frame);
+    }
+
+    ec = (frame->esr_el1 >> 26) & 0x3f;
+    iss = frame->esr_el1 & 0x01ffffff;
+    if (ec == 0x15 && (iss & 0xffffUL) == 0)
+    {
+        return task_schedule_from_exception(frame, 1);
     }
 
     exception_handle_default(frame);
+    return frame;
 }

@@ -1,5 +1,8 @@
 #include "drivers/uart.h"
 #include "kernel/console.h"
+#include "kernel/spinlock.h"
+
+static spinlock_t console_lock;
 
 static int console_is_backspace(char c)
 {
@@ -10,7 +13,7 @@ void console_init(void)
 {
 }
 
-void console_putc(char c)
+void console_putc_unlocked(char c)
 {
     if (c == '\n')
     {
@@ -20,13 +23,31 @@ void console_putc(char c)
     uart_putc(c);
 }
 
-void console_write(const char *str)
+void console_write_unlocked(const char *str)
 {
     while (*str != '\0')
     {
-        console_putc(*str);
+        console_putc_unlocked(*str);
         str++;
     }
+}
+
+void console_putc(char c)
+{
+    unsigned long flags;
+
+    flags = spin_lock_irqsave(&console_lock);
+    console_putc_unlocked(c);
+    spin_unlock_irqrestore(&console_lock, flags);
+}
+
+void console_write(const char *str)
+{
+    unsigned long flags;
+
+    flags = spin_lock_irqsave(&console_lock);
+    console_write_unlocked(str);
+    spin_unlock_irqrestore(&console_lock, flags);
 }
 
 unsigned long console_read_line(char *buffer, unsigned long max_len)

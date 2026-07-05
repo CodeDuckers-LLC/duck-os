@@ -1,11 +1,14 @@
 #include "arch/aarch64/cpu.h"
 #include "arch/aarch64/exceptions.h"
 #include "arch/aarch64/gic.h"
+#include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/memory_layout.h"
 #include "kernel/panic.h"
+#include "kernel/spinlock.h"
+#include "kernel/task.h"
 #include "kernel/test.h"
 #include "kernel/timer.h"
 #include "lib/string.h"
@@ -14,6 +17,8 @@
 
 static unsigned long test_count;
 static unsigned long test_pass_count;
+static unsigned long task_demo_counter_a;
+static unsigned long task_demo_counter_b;
 
 static unsigned long bss_test_word;
 static unsigned char bss_test_buffer[16];
@@ -67,6 +72,11 @@ static void test_daif_irq_mask(void)
 static void test_gic_constants(void)
 {
     test_assert(GIC_IRQ_TIMER_PHYSICAL_PPI == 30U, "timer IRQ id");
+}
+
+static void test_mmu(void)
+{
+    test_assert(mmu_is_enabled(), "mmu enabled");
 }
 
 static void test_memory_layout(void)
@@ -186,6 +196,85 @@ static void test_kprintf_smoke(void)
     test_assert(1, "kprintf smoke");
 }
 
+static void test_spinlock(void)
+{
+    spinlock_t lock;
+    unsigned long saved_daif;
+    unsigned long masked_daif;
+
+    lock.value = 0;
+
+    spin_lock(&lock);
+    test_assert(lock.value == 1U, "spin_lock sets lock");
+    spin_unlock(&lock);
+    test_assert(lock.value == 0U, "spin_unlock clears lock");
+
+    saved_daif = irq_save();
+    masked_daif = sysreg_read_daif();
+    test_assert((masked_daif & (1UL << 7)) != 0, "irq_save masks IRQ");
+    irq_restore(saved_daif);
+    test_assert(sysreg_read_daif() == saved_daif, "irq_restore restores DAIF");
+
+    saved_daif = spin_lock_irqsave(&lock);
+    test_assert(lock.value == 1U, "spin_lock_irqsave sets lock");
+    test_assert((sysreg_read_daif() & (1UL << 7)) != 0, "spin_lock_irqsave masks IRQ");
+    spin_unlock_irqrestore(&lock, saved_daif);
+    test_assert(lock.value == 0U, "spin_unlock_irqrestore clears lock");
+    test_assert(sysreg_read_daif() == saved_daif, "spin_unlock_irqrestore restores DAIF");
+}
+
+static void task_demo_printer(void *arg)
+{
+    unsigned long i;
+
+    (void)arg;
+
+    for (i = 0; i < 3; i++)
+    {
+        task_demo_counter_a++;
+        kprintf("[TASK] printer iteration %u\n", (unsigned int)task_demo_counter_a);
+        task_yield();
+    }
+}
+
+static void task_demo_counter(void *arg)
+{
+    unsigned long i;
+
+    (void)arg;
+
+    for (i = 0; i < 3; i++)
+    {
+        task_demo_counter_b += 10;
+        kprintf("[TASK] counter value %u\n", (unsigned int)task_demo_counter_b);
+        task_yield();
+    }
+}
+
+static void test_tasks(void)
+{
+    struct task *task1;
+    struct task *task2;
+    unsigned long spins;
+
+    task1 = task_create("printer", task_demo_printer, 0);
+    task2 = task_create("counter", task_demo_counter, 0);
+
+    test_assert(task1 != 0, "task create printer");
+    test_assert(task2 != 0, "task create counter");
+
+    spins = 0;
+    while (task_active_count() != 0 && spins < 16)
+    {
+        task_yield();
+        spins++;
+    }
+
+    test_assert(task_active_count() == 0, "task run complete");
+    test_assert(task_demo_counter_a == 3, "task printer count");
+    test_assert(task_demo_counter_b == 30, "task counter value");
+}
+
 static void test_pmm(void)
 {
     unsigned long total_before;
@@ -288,10 +377,13 @@ void test_run_all(void)
     test_exception_install();
     test_daif_irq_mask();
     test_gic_constants();
+    test_mmu();
     test_memory_layout();
     test_string_functions();
     test_kmalloc();
     test_pmm();
+    test_spinlock();
+    test_tasks();
     test_timer();
     test_kprintf_smoke();
 

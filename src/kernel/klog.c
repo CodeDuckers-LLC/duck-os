@@ -2,6 +2,9 @@
 
 #include "kernel/console.h"
 #include "kernel/klog.h"
+#include "kernel/spinlock.h"
+
+static spinlock_t kprintf_lock;
 
 static void kput_unsigned(unsigned long value, unsigned int base)
 {
@@ -9,7 +12,7 @@ static void kput_unsigned(unsigned long value, unsigned int base)
     unsigned long i;
 
     if (value == 0) {
-        console_putc('0');
+        console_putc_unlocked('0');
         return;
     }
 
@@ -28,7 +31,7 @@ static void kput_unsigned(unsigned long value, unsigned int base)
 
     while (i > 0) {
         i--;
-        console_putc(buffer[i]);
+        console_putc_unlocked(buffer[i]);
     }
 }
 
@@ -37,7 +40,7 @@ static void kput_signed(int value)
     unsigned long magnitude;
 
     if (value < 0) {
-        console_putc('-');
+        console_putc_unlocked('-');
         magnitude = (unsigned long)(-(value + 1)) + 1;
     } else {
         magnitude = (unsigned long)value;
@@ -49,19 +52,21 @@ static void kput_signed(int value)
 void kprintf(const char *format, ...)
 {
     va_list args;
+    unsigned long flags;
 
     va_start(args, format);
+    flags = spin_lock_irqsave(&kprintf_lock);
 
     while (*format != '\0') {
         if (*format != '%') {
-            console_putc(*format);
+            console_putc_unlocked(*format);
             format++;
             continue;
         }
 
         format++;
         if (*format == '\0') {
-            console_putc('%');
+            console_putc_unlocked('%');
             break;
         }
 
@@ -75,13 +80,13 @@ void kprintf(const char *format, ...)
             }
 
             while (*str != '\0') {
-                console_putc(*str);
+                console_putc_unlocked(*str);
                 str++;
             }
             break;
         }
         case 'c':
-            console_putc((char)va_arg(args, int));
+            console_putc_unlocked((char)va_arg(args, int));
             break;
         case 'd':
             kput_signed(va_arg(args, int));
@@ -93,22 +98,23 @@ void kprintf(const char *format, ...)
             kput_unsigned((unsigned long)va_arg(args, unsigned int), 16);
             break;
         case 'p':
-            console_putc('0');
-            console_putc('x');
+            console_putc_unlocked('0');
+            console_putc_unlocked('x');
             kput_unsigned((unsigned long)va_arg(args, void *), 16);
             break;
         case '%':
-            console_putc('%');
+            console_putc_unlocked('%');
             break;
         default:
-            console_putc('%');
-            console_putc(*format);
+            console_putc_unlocked('%');
+            console_putc_unlocked(*format);
             break;
         }
 
         format++;
     }
 
+    spin_unlock_irqrestore(&kprintf_lock, flags);
     va_end(args);
 }
 

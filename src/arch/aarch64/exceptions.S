@@ -7,6 +7,7 @@
 .extern exception_handle
 
 .macro vector_entry vector_id
+    // Preserve original x0 long enough to carry vector ID into common entry.
     sub sp, sp, #16
     str x0, [sp]
     mov x0, #\vector_id
@@ -33,8 +34,10 @@ exception_vector_table:
     vector_entry 15
 
 exception_entry_common:
+    // Reserve trap-frame space below the temporary x0 save slot.
     sub sp, sp, #0x130
 
+    // Save general-purpose registers x1-x30. Original x0 is restored below.
     stp x1, x2, [sp, #0x08]
     stp x3, x4, [sp, #0x18]
     stp x5, x6, [sp, #0x28]
@@ -51,9 +54,11 @@ exception_entry_common:
     stp x27, x28, [sp, #0xd8]
     stp x29, x30, [sp, #0xe8]
 
+    // Move original x0 from temporary slot into trap frame x0 field.
     ldr x1, [sp, #0x130]
     str x1, [sp, #0x00]
 
+    // Capture exception-time SP and EL1 syndrome/state registers.
     add x1, sp, #0x140
     str x1, [sp, #0xf8]
 
@@ -72,11 +77,21 @@ exception_entry_common:
     mrs x1, DAIF
     str x1, [sp, #0x120]
 
+    // Store vector slot ID and hand trap frame to C.
     str x0, [sp, #0x128]
 
     mov x0, sp
     bl exception_handle
+    mov sp, x0
 
+    // Restore exception return state for selected task/context.
+    ldr x1, [sp, #0x100]
+    msr ELR_EL1, x1
+
+    ldr x1, [sp, #0x108]
+    msr SPSR_EL1, x1
+
+    // Restore saved state and return to interrupted context.
     ldr x0, [sp, #0x00]
     ldp x1, x2, [sp, #0x08]
     ldp x3, x4, [sp, #0x18]

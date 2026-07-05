@@ -25,6 +25,12 @@ static inline unsigned long sysreg_read_daif(void)
     return value;
 }
 
+static inline void sysreg_write_daif(unsigned long value)
+{
+    asm volatile("msr DAIF, %0" : : "r"(value));
+    asm volatile("isb");
+}
+
 static inline unsigned long sysreg_read_mpidr_el1(void)
 {
     unsigned long value;
@@ -126,6 +132,58 @@ static inline void sysreg_clear_daif_irq(void)
 {
     asm volatile("msr DAIFClr, #2");
     asm volatile("isb");
+}
+
+static inline unsigned long sysreg_read_mair_el1(void)
+{
+    unsigned long value;
+
+    asm volatile("mrs %0, MAIR_EL1" : "=r"(value));
+    return value;
+}
+
+static inline void sysreg_write_mair_el1(unsigned long value)
+{
+    asm volatile("msr MAIR_EL1, %0" : : "r"(value));
+}
+
+static inline unsigned long sysreg_read_tcr_el1(void)
+{
+    unsigned long value;
+
+    asm volatile("mrs %0, TCR_EL1" : "=r"(value));
+    return value;
+}
+
+static inline void sysreg_write_tcr_el1(unsigned long value)
+{
+    asm volatile("msr TCR_EL1, %0" : : "r"(value));
+}
+
+static inline unsigned long sysreg_read_ttbr0_el1(void)
+{
+    unsigned long value;
+
+    asm volatile("mrs %0, TTBR0_EL1" : "=r"(value));
+    return value;
+}
+
+static inline void sysreg_write_ttbr0_el1(unsigned long value)
+{
+    asm volatile("msr TTBR0_EL1, %0" : : "r"(value));
+}
+
+static inline unsigned long sysreg_read_sctlr_el1(void)
+{
+    unsigned long value;
+
+    asm volatile("mrs %0, SCTLR_EL1" : "=r"(value));
+    return value;
+}
+
+static inline void sysreg_write_sctlr_el1(unsigned long value)
+{
+    asm volatile("msr SCTLR_EL1, %0" : : "r"(value));
 }
 
 #endif

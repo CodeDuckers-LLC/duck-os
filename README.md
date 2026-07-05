@@ -11,6 +11,7 @@ Current state:
 - Supports polling-based PL011 UART input
 - Provides tiny UART shell
 - Installs minimal EL1 exception vector table when booted at EL1
+- Enables minimal EL1 MMU identity mapping
 - Handles periodic EL1 physical timer interrupts through QEMU `virt` GICv2
 
 Project does not yet provide:
@@ -87,6 +88,11 @@ ram:      0x40000000 - 0x48000000
 [INFO] UART is working
 [INFO] exceptions: VBAR_EL1 installed
 [INFO] timer: CNTFRQ_EL0=62500000 Hz
+[INFO] mmu: enabling
+[INFO] mmu: enabled
+[INFO] pmm: total pages: 32768
+[INFO] pmm: used pages: ...
+[INFO] pmm: free pages: ...
 [INFO] kernel tests: start
 [INFO] AArch64 system registers:
   CurrentEL: 0x4 (EL1)
@@ -97,6 +103,7 @@ ram:      0x40000000 - 0x48000000
 [TEST] PASS: exception VBAR install
 [TEST] PASS: DAIF IRQ masked during boot
 [TEST] PASS: timer IRQ id
+[TEST] PASS: mmu enabled
 [INFO] physical memory layout:
   RAM start: 0x40000000
   RAM end: 0x48000000
@@ -138,9 +145,9 @@ done
 [TEST] INFO: kprintf char: Q
 [TEST] INFO: kprintf percent/unknown: % %q
 [TEST] PASS: kprintf smoke
-[TEST] SUMMARY: 30/30 passed
+[TEST] SUMMARY: 50/50 passed
 [INFO] kernel tests: halt
-timer interrupt shell: armed for 1000 ms
+timer interrupts active: GICv2, period 1000 ms
 [INFO] IRQ unmasked
 [INFO] shell ready
 >help
@@ -148,9 +155,12 @@ help
 version
 mem
 uptime
+ticks
 panic
 >uptime
 uptime: 4.322 s
+>ticks
+ticks: 10
 ```
 
 ## Exception Test

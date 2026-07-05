@@ -1,8 +1,5 @@
 #include "arch/aarch64/gic.h"
 
-#define GICD_BASE 0x08000000UL
-#define GICC_BASE 0x08010000UL
-
 #define GICD_CTLR ((volatile unsigned int *)(GICD_BASE + 0x000))
 #define GICD_ISENABLER0 ((volatile unsigned int *)(GICD_BASE + 0x100))
 
@@ -10,6 +7,11 @@
 #define GICC_PMR ((volatile unsigned int *)(GICC_BASE + 0x0004))
 #define GICC_IAR ((volatile unsigned int *)(GICC_BASE + 0x000c))
 #define GICC_EOIR ((volatile unsigned int *)(GICC_BASE + 0x0010))
+
+const char *gic_version_name(void)
+{
+    return "GICv2";
+}
 
 void gic_init(void)
 {

@@ -54,13 +54,23 @@ Current kernel treats `__kernel_end` as first free physical address after linked
 3. Masks IRQs in `DAIF` during early setup.
 4. Installs `VBAR_EL1` when running at EL1.
 5. Reads and prints generic timer frequency.
-6. Runs boot self-tests, including `.bss`, exception install, memory layout, allocator, and timer polling checks.
-7. Optionally triggers deliberate `brk` exception in dedicated exception-test build.
-8. Initializes QEMU `virt` GICv2.
-9. Programs EL1 physical timer for 1 second periodic interrupts.
-10. Unmasks IRQs and enters UART shell loop.
+6. Builds simple identity-mapped EL1 page tables and enables MMU.
+7. Initializes physical memory manager and prints page usage.
+8. Runs boot self-tests, including `.bss`, exception install, MMU, memory layout, allocators, and timer polling checks.
+9. Optionally triggers deliberate `brk` exception in dedicated exception-test build.
+10. Initializes QEMU `virt` GICv2.
+11. Programs EL1 physical timer for 1 second periodic interrupts.
+12. Unmasks IRQs and enters UART shell loop.
 
-No device tree parsing, MMU enable, or broad device interrupt support exists yet.
+No device tree parsing, advanced virtual memory layout, or broad device interrupt support exists yet.
+Current MMU setup is intentionally minimal:
+
+- 4 KiB granule
+- TTBR0_EL1 only
+- identity maps RAM as normal cacheable memory
+- identity maps PL011 UART and required GIC MMIO as device memory
+- no high-half kernel mapping
+- no userspace mappings
 
 ## UART
 

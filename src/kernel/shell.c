@@ -17,6 +17,7 @@ static void shell_print_help(void)
     kprintf("version\n");
     kprintf("mem\n");
     kprintf("uptime\n");
+    kprintf("ticks\n");
     kprintf("panic\n");
 }
 
@@ -74,6 +75,11 @@ static void shell_print_uptime(void)
     kprintf("%u s\n", (unsigned int)milliseconds);
 }
 
+static void shell_print_ticks(void)
+{
+    kprintf("ticks: %u\n", (unsigned int)timer_irq_count());
+}
+
 static void shell_run_command(const char *line)
 {
     if (strcmp(line, "") == 0)
@@ -105,6 +111,12 @@ static void shell_run_command(const char *line)
         return;
     }
 
+    if (strcmp(line, "ticks") == 0)
+    {
+        shell_print_ticks();
+        return;
+    }
+
     if (strcmp(line, "panic") == 0)
     {
         panic("panic command");
@@ -121,7 +133,7 @@ void shell_run(void)
 
     while (1)
     {
-        console_write(">");
+        console_write("duck-os@dev > ");
         console_read_line(line, sizeof(line));
         shell_run_command(line);
     }

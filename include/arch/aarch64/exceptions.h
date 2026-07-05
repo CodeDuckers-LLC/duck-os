@@ -16,6 +16,6 @@ struct exception_trap_frame
 void exceptions_init(void);
 int exceptions_self_test(void);
 void exceptions_trigger_test(void);
-void exception_handle(struct exception_trap_frame *frame);
+struct exception_trap_frame *exception_handle(struct exception_trap_frame *frame);
 
 #endif

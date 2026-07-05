@@ -15,6 +15,8 @@ OBJS := \
 	$(BUILD_DIR)/arch/aarch64/exceptions.o \
 	$(BUILD_DIR)/arch/aarch64/exceptions_asm.o \
 	$(BUILD_DIR)/arch/aarch64/gic.o \
+	$(BUILD_DIR)/arch/aarch64/context_switch.o \
+	$(BUILD_DIR)/arch/aarch64/mmu.o \
 	$(BUILD_DIR)/drivers/uart_pl011.o \
 	$(BUILD_DIR)/platform/qemu_virt/platform.o \
 	$(BUILD_DIR)/kernel/console.o \
@@ -24,6 +26,8 @@ OBJS := \
 	$(BUILD_DIR)/kernel/memory_layout.o \
 	$(BUILD_DIR)/kernel/panic.o \
 	$(BUILD_DIR)/kernel/shell.o \
+	$(BUILD_DIR)/kernel/spinlock.o \
+	$(BUILD_DIR)/kernel/task.o \
 	$(BUILD_DIR)/kernel/test.o \
 	$(BUILD_DIR)/kernel/timer.o \
 	$(BUILD_DIR)/mm/pmm.o \
@@ -55,7 +59,15 @@ $(BUILD_DIR)/arch/aarch64/exceptions_asm.o: src/arch/aarch64/exceptions.S includ
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/arch/aarch64/context_switch.o: src/arch/aarch64/context_switch.S | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/arch/aarch64/gic.o: src/arch/aarch64/gic.c include/arch/aarch64/gic.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/arch/aarch64/mmu.o: src/arch/aarch64/mmu.c include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/klog.h include/lib/string.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -71,7 +83,7 @@ $(BUILD_DIR)/kernel/console.o: src/kernel/console.c include/drivers/uart.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/sysreg.h include/kernel/console.h include/kernel/klog.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/console.h include/kernel/klog.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -95,7 +107,15 @@ $(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/kernel/console.h include
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/spinlock.o: src/kernel/spinlock.c include/arch/aarch64/sysreg.h include/kernel/spinlock.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel/task.o: src/kernel/task.c include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/panic.h include/kernel/task.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -119,7 +139,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 
 run: all
 	qemu-system-aarch64 \
-		-M virt \
+		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-nographic \
 		-serial mon:stdio \
@@ -129,7 +149,7 @@ run-exception-test:
 	$(MAKE) clean
 	$(MAKE) CFLAGS="$(CFLAGS) -DEXCEPTION_SELF_TEST=1" all
 	qemu-system-aarch64 \
-		-M virt \
+		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-nographic \
 		-serial mon:stdio \
@@ -137,7 +157,7 @@ run-exception-test:
 
 debug: all
 	qemu-system-aarch64 \
-		-M virt \
+		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-nographic \
 		-serial mon:stdio \

@@ -1,11 +1,13 @@
 #include "arch/aarch64/exceptions.h"
 #include "arch/aarch64/gic.h"
+#include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/cpu.h"
 #include "kernel/console.h"
 #include "kernel/klog.h"
 #include "kernel/shell.h"
 #include "kernel/test.h"
+#include "kernel/task.h"
 #include "kernel/timer.h"
 #include "mm/pmm.h"
 #include "platform/platform.h"
@@ -54,16 +56,19 @@ void kernel_main(void)
     klog_info("UART is working");
     exceptions_init();
     timer_init();
+    mmu_init();
     pmm_init();
+    task_init();
     test_run_all();
 
     gic_init();
     gic_enable_irq(GIC_IRQ_TIMER_PHYSICAL_PPI);
-    timer_start_periodic_ms(1000);
+    timer_start_periodic_ms(10);
 
-    kprintf("timer interrupt shell: armed for 1000 ms\n");
+    kprintf("timer interrupts active: %s, period 10 ms\n", gic_version_name());
     sysreg_clear_daif_irq();
     klog_info("IRQ unmasked");
+    task_run_preemptive_demo();
 
     shell_run();
 }
