@@ -1,6 +1,7 @@
 #include "arch/aarch64/exceptions.h"
 #include "arch/aarch64/gic.h"
 #include "arch/aarch64/sysreg.h"
+#include "drivers/virtio.h"
 #include "kernel/klog.h"
 #include "kernel/panic.h"
 #include "kernel/syscall.h"
@@ -278,6 +279,13 @@ static struct exception_trap_frame *exception_handle_irq(struct exception_trap_f
         {
             return task_schedule_from_exception(frame, 1);
         }
+        return frame;
+    }
+
+    if (irq_id >= 48U && irq_id < 80U)
+    {
+        virtio_handle_irq(irq_id);
+        gic_end_irq(irq_id);
         return frame;
     }
 

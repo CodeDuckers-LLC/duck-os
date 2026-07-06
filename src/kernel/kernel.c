@@ -3,6 +3,8 @@
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/cpu.h"
+#include "drivers/virtio.h"
+#include "drivers/virtio_rng.h"
 #include "kernel/console.h"
 #include "kernel/initramfs.h"
 #include "kernel/klog.h"
@@ -59,12 +61,15 @@ void kernel_main(void)
     timer_init();
     mmu_init();
     pmm_init();
+    virtio_init();
+    virtio_rng_init();
     initramfs_init();
     task_init();
     test_run_all();
 
     gic_init();
     gic_enable_irq(GIC_IRQ_TIMER_PHYSICAL_PPI);
+    virtio_enable_irqs();
     timer_start_periodic_ms(10);
 
     kprintf("timer interrupts active: %s, period 10 ms\n", gic_version_name());

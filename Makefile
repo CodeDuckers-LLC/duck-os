@@ -18,6 +18,9 @@ OBJS := \
 	$(BUILD_DIR)/arch/aarch64/gic.o \
 	$(BUILD_DIR)/arch/aarch64/context_switch.o \
 	$(BUILD_DIR)/arch/aarch64/mmu.o \
+	$(BUILD_DIR)/drivers/virtqueue.o \
+	$(BUILD_DIR)/drivers/virtio_mmio.o \
+	$(BUILD_DIR)/drivers/virtio_rng.o \
 	$(BUILD_DIR)/arch/aarch64/user_enter.o \
 	$(BUILD_DIR)/drivers/uart_pl011.o \
 	$(BUILD_DIR)/platform/qemu_virt/platform.o \
@@ -78,6 +81,18 @@ $(BUILD_DIR)/arch/aarch64/mmu.o: src/arch/aarch64/mmu.c include/arch/aarch64/gic
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/drivers/virtqueue.o: src/drivers/virtqueue.c include/drivers/virtqueue.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/drivers/virtio_mmio.o: src/drivers/virtio_mmio.c include/arch/aarch64/gic.h include/drivers/virtio.h include/kernel/klog.h include/platform/platform.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/drivers/virtio_rng.o: src/drivers/virtio_rng.c include/arch/aarch64/cpu.h include/drivers/virtio.h include/drivers/virtio_rng.h include/kernel/klog.h include/kernel/spinlock.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/arch/aarch64/user_enter.o: src/arch/aarch64/user_enter.S | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -94,7 +109,7 @@ $(BUILD_DIR)/kernel/console.o: src/kernel/console.c include/drivers/uart.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/console.h include/kernel/klog.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/drivers/virtio.h include/drivers/virtio_rng.h include/kernel/console.h include/kernel/klog.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -118,7 +133,7 @@ $(BUILD_DIR)/kernel/panic.o: src/kernel/panic.c include/arch/aarch64/cpu.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/kernel/console.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/drivers/virtio_rng.h include/kernel/console.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -134,7 +149,7 @@ $(BUILD_DIR)/kernel/task.o: src/kernel/task.c include/arch/aarch64/sysreg.h incl
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/drivers/virtio.h include/drivers/virtio_rng.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -183,8 +198,10 @@ run: all
 	qemu-system-aarch64 \
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
+		-global virtio-mmio.force-legacy=false \
 		-nographic \
 		-serial mon:stdio \
+		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-kernel $(KERNEL_ELF)
 
 run-exception-test:
@@ -193,16 +210,20 @@ run-exception-test:
 	qemu-system-aarch64 \
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
+		-global virtio-mmio.force-legacy=false \
 		-nographic \
 		-serial mon:stdio \
+		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-kernel $(KERNEL_ELF)
 
 debug: all
 	qemu-system-aarch64 \
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
+		-global virtio-mmio.force-legacy=false \
 		-nographic \
 		-serial mon:stdio \
+		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-S \
 		-s \
 		-kernel $(KERNEL_ELF)

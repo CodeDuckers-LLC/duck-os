@@ -3,6 +3,8 @@
 #include "arch/aarch64/gic.h"
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
+#include "drivers/virtio.h"
+#include "drivers/virtio_rng.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/initramfs.h"
@@ -107,6 +109,14 @@ static void test_memory_layout(void)
     test_assert(kernel_end > kernel_start && kernel_end <= ram_end, "kernel end in RAM");
     test_assert(first_free >= kernel_end, "first free physical address");
     test_assert((first_free & (PMM_PAGE_SIZE - 1)) == 0, "first free page aligned");
+}
+
+static void test_platform_virtio_layout(void)
+{
+    test_assert(platform_get_virtio_mmio_base() == 0x0a000000UL, "virtio mmio base");
+    test_assert(platform_get_virtio_mmio_stride() == 0x200UL, "virtio mmio stride");
+    test_assert(platform_get_virtio_mmio_count() == 32U, "virtio mmio count");
+    test_assert(platform_get_virtio_mmio_irq(0) == 48U, "virtio mmio irq0");
 }
 
 static void test_string_functions(void)
@@ -407,6 +417,12 @@ static void test_timer(void)
     test_assert(timer_irq_count() == 0, "timer IRQ count before enable");
 }
 
+static void test_virtio(void)
+{
+    test_assert(virtio_device_count() >= 1U, "virtio device detected");
+    test_assert(virtio_rng_available(), "virtio rng ready");
+}
+
 static void print_cpu_register_state(void)
 {
     unsigned long currentel;
@@ -439,6 +455,7 @@ void test_run_all(void)
     test_gic_constants();
     test_mmu();
     test_memory_layout();
+    test_platform_virtio_layout();
     test_string_functions();
     test_kmalloc();
     test_pmm();
@@ -448,6 +465,7 @@ void test_run_all(void)
     test_initramfs();
     test_tasks();
     test_timer();
+    test_virtio();
     test_kprintf_smoke();
 
     kprintf("[TEST] SUMMARY: %u/%u passed\n",

@@ -6,6 +6,7 @@
 #include "kernel/panic.h"
 #include "kernel/shell.h"
 #include "kernel/timer.h"
+#include "drivers/virtio_rng.h"
 #include "lib/string.h"
 #include "mm/pmm.h"
 
@@ -21,6 +22,7 @@ static void shell_print_help(void)
     kprintf("mem\n");
     kprintf("uptime\n");
     kprintf("ticks\n");
+    kprintf("rng\n");
     kprintf("panic\n");
 }
 
@@ -81,6 +83,32 @@ static void shell_print_uptime(void)
 static void shell_print_ticks(void)
 {
     kprintf("ticks: %u\n", (unsigned int)timer_irq_count());
+}
+
+static void shell_print_rng(void)
+{
+    unsigned char bytes[16];
+    unsigned int count;
+    unsigned int i;
+
+    if (!virtio_rng_available())
+    {
+        kprintf("virtio-rng unavailable\n");
+        return;
+    }
+
+    if (virtio_rng_fill(bytes, sizeof(bytes), &count) != 0)
+    {
+        kprintf("virtio-rng request failed\n");
+        return;
+    }
+
+    kprintf("rng:");
+    for (i = 0; i < count; i++)
+    {
+        kprintf(" %x", (unsigned int)bytes[i]);
+    }
+    kprintf("\n");
 }
 
 static int shell_starts_with(const char *text, const char *prefix)
@@ -185,6 +213,12 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "ticks") == 0)
     {
         shell_print_ticks();
+        return;
+    }
+
+    if (strcmp(line, "rng") == 0)
+    {
+        shell_print_rng();
         return;
     }
 

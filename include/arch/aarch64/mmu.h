@@ -6,5 +6,7 @@ int mmu_is_enabled(void);
 void mmu_map_user_code_page(unsigned long virtual_address, unsigned long physical_address);
 void mmu_map_user_data_page(unsigned long virtual_address, unsigned long physical_address);
 void mmu_sync_for_exec(void *address, unsigned long size);
+void mmu_sync_for_device(void *address, unsigned long size);
+void mmu_sync_for_cpu(void *address, unsigned long size);
 
 #endif

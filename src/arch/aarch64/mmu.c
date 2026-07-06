@@ -125,6 +125,16 @@ static void mmu_dc_cvau(unsigned long address)
     asm volatile("dc cvau, %0" : : "r"(address));
 }
 
+static void mmu_dc_civac(unsigned long address)
+{
+    asm volatile("dc civac, %0" : : "r"(address));
+}
+
+static void mmu_dc_ivac(unsigned long address)
+{
+    asm volatile("dc ivac, %0" : : "r"(address));
+}
+
 static void mmu_build_tables(void)
 {
     unsigned long address;
@@ -145,6 +155,9 @@ static void mmu_build_tables(void)
                      MMU_DESC_AF | MMU_DESC_ATTR_DEVICE | MMU_DESC_PXN | MMU_DESC_UXN);
     mmu_map_l2_block(mmu_l2_low_table,
                      platform_get_uart0_base(),
+                     MMU_DESC_AF | MMU_DESC_ATTR_DEVICE | MMU_DESC_PXN | MMU_DESC_UXN);
+    mmu_map_l2_block(mmu_l2_low_table,
+                     platform_get_virtio_mmio_base(),
                      MMU_DESC_AF | MMU_DESC_ATTR_DEVICE | MMU_DESC_PXN | MMU_DESC_UXN);
 
     ram_start = platform_get_ram_base();
@@ -260,6 +273,39 @@ void mmu_sync_for_exec(void *address, unsigned long size)
     for (; current < end; current += 64UL)
     {
         mmu_ic_ivau(current);
+    }
+
+    mmu_dsb_ish();
+    mmu_isb();
+}
+
+void mmu_sync_for_device(void *address, unsigned long size)
+{
+    unsigned long current;
+    unsigned long end;
+
+    current = (unsigned long)address & ~63UL;
+    end = ((unsigned long)address + size + 63UL) & ~63UL;
+
+    for (; current < end; current += 64UL)
+    {
+        mmu_dc_civac(current);
+    }
+
+    mmu_dsb_ish();
+}
+
+void mmu_sync_for_cpu(void *address, unsigned long size)
+{
+    unsigned long current;
+    unsigned long end;
+
+    current = (unsigned long)address & ~63UL;
+    end = ((unsigned long)address + size + 63UL) & ~63UL;
+
+    for (; current < end; current += 64UL)
+    {
+        mmu_dc_ivac(current);
     }
 
     mmu_dsb_ish();
