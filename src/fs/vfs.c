@@ -184,13 +184,23 @@ static int vfs_directory_exists(const char *directory)
 
 int vfs_mount_root(void)
 {
+    block_device_t *device;
+
     if (!tinyfs_is_mounted())
     {
         return -1;
     }
 
+    device = tinyfs_device();
+    if (device == 0)
+    {
+        return -1;
+    }
+
     vfs_ready = 1;
-    klog_info("vfs: root mounted");
+    kprintf("[INFO] vfs: root mounted fs=%s device=%s\n",
+            vfs_root_fs_name(),
+            device->name);
     return 0;
 }
 

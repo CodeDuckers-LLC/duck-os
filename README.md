@@ -80,6 +80,18 @@ Build output:
 make run
 ```
 
+Run with a VirtIO GPU display device:
+
+```sh
+make run-gfx
+```
+
+Headless GPU bring-up with serial output only:
+
+```sh
+make run-gfx-headless
+```
+
 Current serial output:
 
 ```text
@@ -217,3 +229,4 @@ continue
 - [Roadmap](docs/roadmap.md)
 - [Coding style](docs/coding-style.md)
 - [Initramfs](docs/initramfs.md)
+- [Graphics plan](docs/graphics.md)

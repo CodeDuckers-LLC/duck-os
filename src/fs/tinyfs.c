@@ -60,16 +60,19 @@ int tinyfs_mount(block_device_t *device)
     unsigned int entry_offset;
     unsigned int index;
 
+    tinyfs_block_device = 0;
+    tinyfs_ready = 0;
+
     if (device == 0 || device->read_blocks == 0 || device->block_size > sizeof(tinyfs_block_buffer))
     {
         return -1;
     }
 
     tinyfs_block_device = device;
-    tinyfs_ready = 0;
 
     if (tinyfs_read_bytes(0, &tinyfs_header, sizeof(tinyfs_header)) != 0)
     {
+        tinyfs_block_device = 0;
         return -1;
     }
 
@@ -77,6 +80,7 @@ int tinyfs_mount(block_device_t *device)
         tinyfs_header.version != TINYFS_VERSION ||
         tinyfs_header.file_count > TINYFS_MAX_FILES)
     {
+        tinyfs_block_device = 0;
         return -1;
     }
 
@@ -85,6 +89,7 @@ int tinyfs_mount(block_device_t *device)
     {
         if (tinyfs_read_bytes(entry_offset, &tinyfs_files[index], sizeof(tinyfs_files[index])) != 0)
         {
+            tinyfs_block_device = 0;
             return -1;
         }
 

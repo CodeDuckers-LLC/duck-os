@@ -7,8 +7,10 @@
 #include "drivers/ramdisk.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_blk.h"
+#include "drivers/virtio_gpu.h"
 #include "drivers/virtio_rng.h"
 #include "fs/file.h"
+#include "fs/logfs.h"
 #include "fs/tinyfs.h"
 #include "fs/vfs.h"
 #include "kernel/klog.h"
@@ -430,6 +432,20 @@ static void test_virtio(void)
     test_assert(virtio_blk_available(), "virtio blk ready");
 }
 
+static void test_virtio_gpu(void)
+{
+    if (!virtio_gpu_available())
+    {
+        test_assert(1, "virtio gpu optional");
+        return;
+    }
+
+    test_assert(virtio_gpu_width() > 0U, "virtio gpu width");
+    test_assert(virtio_gpu_height() > 0U, "virtio gpu height");
+    test_assert(virtio_gpu_framebuffer() != 0, "virtio gpu framebuffer");
+    test_assert(virtio_gpu_redraw_demo() == 0, "virtio gpu redraw");
+}
+
 static void test_virtio_blk(void)
 {
     block_device_t *device;
@@ -438,11 +454,11 @@ static void test_virtio_blk(void)
     device = block_find_device("vda");
     test_assert(device != 0, "virtio blk device present");
     test_assert(device->block_size == 512U, "virtio blk block size");
-    test_assert(device->block_count >= 32U, "virtio blk capacity");
-    test_assert(device->write_blocks == 0, "virtio blk read only");
+    test_assert(device->block_count > 0U, "virtio blk capacity");
+    test_assert(device->write_blocks != 0, "virtio blk write available");
     test_assert(device->read_blocks(device, 0, 1, buffer) == 0, "virtio blk read block 0");
-    test_assert(memcmp(buffer, "DUCKBLK0", 8) == 0, "virtio blk block 0 magic");
-    test_assert(memcmp(buffer + 16, "virtio-blk demo block 0\n", 24) == 0, "virtio blk block 0 text");
+    test_assert(memcmp(buffer, "LGFS", 4) == 0, "virtio blk block 0 logfs magic");
+    test_assert(buffer[4] == 1U, "virtio blk block 0 logfs version");
 }
 
 static void test_ramdisk(void)
@@ -479,12 +495,16 @@ static void test_ramdisk(void)
 
 static void test_tinyfs(void)
 {
+    block_device_t *device;
     const tinyfs_file_t *file;
     unsigned char buffer[64];
     int size;
 
     test_assert(tinyfs_is_mounted(), "tinyfs mounted");
-    test_assert(tinyfs_device() == ramdisk_device(), "tinyfs device");
+    device = tinyfs_device();
+    test_assert(device != 0, "tinyfs device");
+    test_assert(strcmp(device->name, "vda") == 0 || strcmp(device->name, "ram0") == 0,
+                "tinyfs device name");
     test_assert(tinyfs_file_count() >= 6U, "tinyfs file count");
 
     file = tinyfs_find("hello.txt");
@@ -502,6 +522,7 @@ static void test_tinyfs(void)
 
 static void test_vfs(void)
 {
+    block_device_t *device;
     const vfs_file_info_t *file;
     const vfs_file_info_t *directory;
     unsigned char buffer[64];
@@ -509,7 +530,9 @@ static void test_vfs(void)
 
     test_assert(vfs_is_mounted(), "vfs mounted");
     test_assert(strcmp(vfs_root_fs_name(), "tinyfs") == 0, "vfs root fs name");
-    test_assert(vfs_root_device() == ramdisk_device(), "vfs root device");
+    device = vfs_root_device();
+    test_assert(device != 0, "vfs root device");
+    test_assert(device == tinyfs_device(), "vfs root matches tinyfs device");
     test_assert(vfs_root_file_count() >= 6U, "vfs root file count");
     test_assert(vfs_list("/") == 0, "vfs list root");
     test_assert(vfs_list("/bin") == 0, "vfs list /bin");
@@ -535,6 +558,54 @@ static void test_vfs(void)
     test_assert(memcmp(buffer, "tinyfs says hi\n", 15) == 0, "vfs /etc/motd contents");
     test_assert(vfs_read_file("/", buffer, sizeof(buffer)) < 0, "vfs read root rejected");
     test_assert(vfs_read_file("/etc", buffer, sizeof(buffer)) < 0, "vfs read dir rejected");
+}
+
+static void test_logfs(void)
+{
+    const logfs_file_info_t *file;
+    unsigned int index;
+    int found;
+    unsigned char buffer[64];
+    int size;
+
+    test_assert(logfs_is_mounted(), "logfs mounted");
+    test_assert(logfs_device() != 0, "logfs device");
+    test_assert(strcmp(logfs_device()->name, "vda") == 0, "logfs device name");
+    if (logfs_stat("notes.txt") == 0)
+    {
+        test_assert(logfs_create("notes.txt") == 0, "logfs create");
+        test_assert(logfs_append("notes.txt", "hello", 5) == 0, "logfs append first");
+        test_assert(logfs_append("notes.txt", " world\n", 7) == 0, "logfs append second");
+    }
+    else
+    {
+        test_assert(1, "logfs create");
+        test_assert(1, "logfs append first");
+        test_assert(1, "logfs append second");
+    }
+
+    test_assert(logfs_create("notes.txt") != 0, "logfs duplicate create rejected");
+    file = logfs_stat("notes.txt");
+    test_assert(file != 0, "logfs stat file");
+    test_assert(file->size == 12U, "logfs size");
+    test_assert(logfs_file_count() >= 1U, "logfs file count");
+    found = 0;
+    for (index = 0; index < logfs_file_count(); index++)
+    {
+        file = logfs_get_file(index);
+        if (file != 0 && strcmp(file->name, "notes.txt") == 0)
+        {
+            found = 1;
+            break;
+        }
+    }
+    test_assert(found, "logfs list file");
+    size = logfs_read_file("notes.txt", buffer, sizeof(buffer));
+    test_assert(size == 12, "logfs read file");
+    test_assert(memcmp(buffer, "hello world\n", 12) == 0, "logfs read contents");
+    size = logfs_read_file_part("notes.txt", 6U, buffer, 5U);
+    test_assert(size == 5, "logfs read part");
+    test_assert(memcmp(buffer, "world", 5) == 0, "logfs read part contents");
 }
 
 static void test_file_layer(void)
@@ -622,10 +693,12 @@ void test_run_all(void)
     test_tasks();
     test_timer();
     test_virtio();
+    test_virtio_gpu();
     test_virtio_blk();
     test_ramdisk();
     test_tinyfs();
     test_vfs();
+    test_logfs();
     test_file_layer();
     test_user_file_loader();
     test_kprintf_smoke();

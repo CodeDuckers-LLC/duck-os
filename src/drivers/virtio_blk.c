@@ -11,6 +11,7 @@
 #define VIRTIO_BLK_BLOCK_SIZE 512U
 
 #define VIRTIO_BLK_T_IN 0U
+#define VIRTIO_BLK_T_OUT 1U
 #define VIRTIO_BLK_S_OK 0U
 
 #define VIRTIO_BLK_CONFIG_CAPACITY_LOW 0x100UL
@@ -97,10 +98,11 @@ static void virtio_blk_irq(struct virtio_mmio_device *device, unsigned int inter
     virtio_blk_complete_used();
 }
 
-static int virtio_blk_read_blocks_fn(struct block_device *device,
-                                     unsigned long start_block,
-                                     unsigned long block_count,
-                                     void *buffer)
+static int virtio_blk_transfer(struct block_device *device,
+                               unsigned int request_type,
+                               unsigned long start_block,
+                               unsigned long block_count,
+                               void *buffer)
 {
     unsigned long flags;
     unsigned long byte_count;
@@ -161,7 +163,7 @@ static int virtio_blk_read_blocks_fn(struct block_device *device,
     /* One synchronous request uses three descriptors:
      * header written by driver, data buffer written by device, status byte written by device.
      */
-    virtio_blk_state.request_header.type = VIRTIO_BLK_T_IN;
+    virtio_blk_state.request_header.type = request_type;
     virtio_blk_state.request_header.reserved = 0;
     virtio_blk_state.request_header.sector = start_block;
     virtio_blk_state.request_status = 0xffU;
@@ -181,7 +183,11 @@ static int virtio_blk_read_blocks_fn(struct block_device *device,
 
     virtio_blk_state.queue.desc[data_desc].addr = (unsigned long)buffer;
     virtio_blk_state.queue.desc[data_desc].len = (unsigned int)byte_count;
-    virtio_blk_state.queue.desc[data_desc].flags = VIRTQ_DESC_F_NEXT | VIRTQ_DESC_F_WRITE;
+    virtio_blk_state.queue.desc[data_desc].flags = VIRTQ_DESC_F_NEXT;
+    if (request_type == VIRTIO_BLK_T_IN)
+    {
+        virtio_blk_state.queue.desc[data_desc].flags |= VIRTQ_DESC_F_WRITE;
+    }
     virtio_blk_state.queue.desc[data_desc].next = (unsigned short)status_desc;
 
     virtio_blk_state.queue.desc[status_desc].addr = (unsigned long)&virtio_blk_state.request_status;
@@ -201,7 +207,10 @@ static int virtio_blk_read_blocks_fn(struct block_device *device,
         virtio_blk_complete_used();
     }
 
-    mmu_sync_for_cpu((void *)buffer, byte_count);
+    if (request_type == VIRTIO_BLK_T_IN)
+    {
+        mmu_sync_for_cpu((void *)buffer, byte_count);
+    }
     mmu_sync_for_cpu((void *)&virtio_blk_state.request_status, sizeof(virtio_blk_state.request_status));
 
     if (virtio_blk_state.request_status != VIRTIO_BLK_S_OK ||
@@ -211,6 +220,26 @@ static int virtio_blk_read_blocks_fn(struct block_device *device,
     }
 
     return 0;
+}
+
+static int virtio_blk_read_blocks_fn(struct block_device *device,
+                                     unsigned long start_block,
+                                     unsigned long block_count,
+                                     void *buffer)
+{
+    return virtio_blk_transfer(device, VIRTIO_BLK_T_IN, start_block, block_count, buffer);
+}
+
+static int virtio_blk_write_blocks_fn(struct block_device *device,
+                                      unsigned long start_block,
+                                      unsigned long block_count,
+                                      const void *buffer)
+{
+    return virtio_blk_transfer(device,
+                               VIRTIO_BLK_T_OUT,
+                               start_block,
+                               block_count,
+                               (void *)buffer);
 }
 
 void virtio_blk_init(void)
@@ -269,7 +298,7 @@ void virtio_blk_init(void)
     virtio_blk_state.block_device.block_count = capacity;
     virtio_blk_state.block_device.driver_data = &virtio_blk_state;
     virtio_blk_state.block_device.read_blocks = virtio_blk_read_blocks_fn;
-    virtio_blk_state.block_device.write_blocks = 0;
+    virtio_blk_state.block_device.write_blocks = virtio_blk_write_blocks_fn;
 
     if (block_register_device(&virtio_blk_state.block_device) != 0)
     {
@@ -290,4 +319,9 @@ void virtio_blk_init(void)
 int virtio_blk_available(void)
 {
     return virtio_blk_state.device != 0 && virtio_blk_state.device->initialized;
+}
+
+int virtio_blk_writable(void)
+{
+    return virtio_blk_available() && virtio_blk_state.block_device.write_blocks != 0;
 }

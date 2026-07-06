@@ -1,6 +1,8 @@
 #include "block/block_device.h"
 #include "drivers/virtio.h"
+#include "drivers/virtio_gpu.h"
 #include "fs/file.h"
+#include "fs/logfs.h"
 #include "fs/vfs.h"
 #include "kernel/console.h"
 #include "kernel/klog.h"
@@ -22,6 +24,7 @@
 static const char *shell_read_token(const char *text, char *buffer, unsigned long buffer_size);
 static int shell_parse_unsigned_long(const char *text, unsigned long *value_out);
 static void shell_dump_hex_line(unsigned long offset, const unsigned char *buffer, unsigned int count);
+static const char *shell_skip_spaces(const char *text);
 
 static void shell_print_help(void)
 {
@@ -37,6 +40,13 @@ static void shell_print_help(void)
     kprintf("blk\n");
     kprintf("blkread <device> <block>\n");
     kprintf("fsinfo\n");
+    kprintf("gpuinfo\n");
+    kprintf("gpudemo\n");
+    kprintf("logls\n");
+    kprintf("logcat <file>\n");
+    kprintf("logcreate <file>\n");
+    kprintf("logappend <file> <text>\n");
+    kprintf("logfsinfo\n");
     kprintf("virtio\n");
     kprintf("rng\n");
     kprintf("panic\n");
@@ -119,7 +129,8 @@ static void shell_print_fsinfo(void)
     device = vfs_root_device();
 
     kprintf("fs: %s\n", vfs_root_fs_name());
-    kprintf("device: %s\n", device->name);
+    kprintf("backing device: %s\n", device->name);
+    kprintf("access: ro\n");
     kprintf("files: %u\n", vfs_root_file_count());
     kprintf("mount: /\n");
 }
@@ -148,6 +159,157 @@ static void shell_print_rng(void)
         kprintf(" %x", (unsigned int)bytes[i]);
     }
     kprintf("\n");
+}
+
+static void shell_print_gpuinfo(void)
+{
+    const framebuffer_t *fb;
+
+    if (!virtio_gpu_available())
+    {
+        kprintf("virtio-gpu unavailable\n");
+        return;
+    }
+
+    fb = virtio_gpu_framebuffer();
+    if (fb == 0)
+    {
+        kprintf("virtio-gpu framebuffer unavailable\n");
+        return;
+    }
+
+    kprintf("gpu: virtio-gpu\n");
+    kprintf("resolution: %u x %u\n", virtio_gpu_width(), virtio_gpu_height());
+    kprintf("stride: %u\n", fb->stride);
+    kprintf("format: b8g8r8a8\n");
+}
+
+static void shell_run_gpu_demo(void)
+{
+    if (virtio_gpu_redraw_demo() != 0)
+    {
+        kprintf("gpudemo failed\n");
+    }
+}
+
+static void shell_print_logfsinfo(void)
+{
+    block_device_t *device;
+
+    if (!logfs_is_mounted())
+    {
+        kprintf("logfs not mounted\n");
+        return;
+    }
+
+    device = logfs_device();
+    kprintf("fs: logfs\n");
+    kprintf("backing device: %s\n", device->name);
+    kprintf("access: append-only\n");
+    kprintf("files: %u\n", logfs_file_count());
+}
+
+static void shell_log_list(void)
+{
+    unsigned int index;
+
+    if (!logfs_is_mounted())
+    {
+        kprintf("logfs not mounted\n");
+        return;
+    }
+
+    for (index = 0; index < logfs_file_count(); index++)
+    {
+        const logfs_file_info_t *file;
+
+        file = logfs_get_file(index);
+        if (file != 0)
+        {
+            kprintf("%s\n", file->name);
+        }
+    }
+}
+
+static void shell_log_cat(const char *name)
+{
+    unsigned char buffer[SHELL_FILE_BUFFER_MAX];
+    const logfs_file_info_t *file;
+    unsigned int offset;
+    unsigned char last_char;
+
+    if (*name == '\0')
+    {
+        kprintf("usage: logcat <file>\n");
+        return;
+    }
+
+    file = logfs_stat(name);
+    if (file == 0)
+    {
+        kprintf("file not found: %s\n", name);
+        return;
+    }
+
+    offset = 0;
+    last_char = '\0';
+    while (offset < file->size)
+    {
+        int read_size;
+        unsigned int index;
+
+        read_size = logfs_read_file_part(name, offset, buffer, sizeof(buffer));
+        if (read_size <= 0)
+        {
+            kprintf("logcat failed: %s\n", name);
+            return;
+        }
+
+        for (index = 0; index < (unsigned int)read_size; index++)
+        {
+            console_putc((char)buffer[index]);
+        }
+        last_char = buffer[read_size - 1];
+        offset += (unsigned int)read_size;
+    }
+
+    if (file->size == 0U || last_char != '\n')
+    {
+        console_putc('\n');
+    }
+}
+
+static void shell_log_create(const char *name)
+{
+    if (*name == '\0')
+    {
+        kprintf("usage: logcreate <file>\n");
+        return;
+    }
+
+    if (logfs_create(name) != 0)
+    {
+        kprintf("logcreate failed: %s\n", name);
+    }
+}
+
+static void shell_log_append(const char *args)
+{
+    char file_name[LOGFS_NAME_MAX];
+    const char *text;
+
+    text = shell_read_token(args, file_name, sizeof(file_name));
+    text = shell_skip_spaces(text);
+    if (file_name[0] == '\0' || *text == '\0')
+    {
+        kprintf("usage: logappend <file> <text>\n");
+        return;
+    }
+
+    if (logfs_append(file_name, text, strlen(text)) != 0)
+    {
+        kprintf("logappend failed: %s\n", file_name);
+    }
 }
 
 static void shell_print_virtio(void)
@@ -472,6 +634,48 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "fsinfo") == 0)
     {
         shell_print_fsinfo();
+        return;
+    }
+
+    if (strcmp(line, "gpuinfo") == 0)
+    {
+        shell_print_gpuinfo();
+        return;
+    }
+
+    if (strcmp(line, "gpudemo") == 0)
+    {
+        shell_run_gpu_demo();
+        return;
+    }
+
+    if (strcmp(line, "logls") == 0)
+    {
+        shell_log_list();
+        return;
+    }
+
+    if (shell_starts_with(line, "logcat"))
+    {
+        shell_log_cat(shell_skip_spaces(line + 6));
+        return;
+    }
+
+    if (shell_starts_with(line, "logcreate"))
+    {
+        shell_log_create(shell_skip_spaces(line + 9));
+        return;
+    }
+
+    if (shell_starts_with(line, "logappend"))
+    {
+        shell_log_append(shell_skip_spaces(line + 9));
+        return;
+    }
+
+    if (strcmp(line, "logfsinfo") == 0)
+    {
+        shell_print_logfsinfo();
         return;
     }
 

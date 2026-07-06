@@ -1,3 +1,4 @@
+#include "block/block_device.h"
 #include "arch/aarch64/exceptions.h"
 #include "arch/aarch64/gic.h"
 #include "arch/aarch64/mmu.h"
@@ -5,8 +6,10 @@
 #include "arch/aarch64/cpu.h"
 #include "drivers/ramdisk.h"
 #include "drivers/virtio_blk.h"
+#include "drivers/virtio_gpu.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_rng.h"
+#include "fs/logfs.h"
 #include "fs/tinyfs.h"
 #include "fs/vfs.h"
 #include "kernel/console.h"
@@ -71,6 +74,60 @@ static int kernel_load_tinyfs_image(block_device_t *device)
     return device->write_blocks(device, 0, block_count, _binary_build_tinyfs_img_start);
 }
 
+static int kernel_mount_root_tinyfs(block_device_t *ramdisk)
+{
+    block_device_t *virtio_root;
+
+    virtio_root = block_find_device("vda");
+    if (virtio_root != 0)
+    {
+        if (tinyfs_mount(virtio_root) == 0)
+        {
+            kprintf("[INFO] rootfs: mounted tinyfs from %s\n", virtio_root->name);
+            return 0;
+        }
+
+        kprintf("[INFO] rootfs: %s does not contain a valid tinyfs image, falling back to %s\n",
+                virtio_root->name,
+                ramdisk->name);
+    }
+    else
+    {
+        kprintf("[INFO] rootfs: vda unavailable, falling back to %s\n", ramdisk->name);
+    }
+
+    if (kernel_load_tinyfs_image(ramdisk) != 0)
+    {
+        return -1;
+    }
+
+    if (tinyfs_mount(ramdisk) != 0)
+    {
+        return -1;
+    }
+
+    kprintf("[INFO] rootfs: mounted tinyfs from %s\n", ramdisk->name);
+    return 0;
+}
+
+static void kernel_mount_logfs(void)
+{
+    block_device_t *device;
+
+    device = block_find_device("vda");
+    if (device == 0)
+    {
+        kprintf("[INFO] logfs: vda unavailable\n");
+        return;
+    }
+
+    if (logfs_mount(device) != 0)
+    {
+        kprintf("[INFO] logfs: %s not mounted\n", device->name);
+        return;
+    }
+}
+
 void kernel_main(void)
 {
     unsigned long ram_start;
@@ -100,20 +157,21 @@ void kernel_main(void)
     virtio_rng_init();
     ramdisk_init();
     virtio_blk_init();
+    virtio_gpu_init();
     ramdisk = ramdisk_device();
-    if (kernel_load_tinyfs_image(ramdisk) != 0)
+    if (ramdisk == 0)
     {
-        panic("tinyfs image load failed");
+        panic("ramdisk unavailable");
     }
-    if (tinyfs_mount(ramdisk) != 0)
+    if (kernel_mount_root_tinyfs(ramdisk) != 0)
     {
-        panic("tinyfs mount failed");
+        panic("tinyfs root mount failed");
     }
-    klog_info("TinyFS mounted");
     if (vfs_mount_root() != 0)
     {
         panic("vfs root mount failed");
     }
+    kernel_mount_logfs();
     initramfs_init();
     task_init();
     test_run_all();

@@ -22,11 +22,14 @@ OBJS := \
 	$(BUILD_DIR)/drivers/virtqueue.o \
 	$(BUILD_DIR)/drivers/ramdisk.o \
 	$(BUILD_DIR)/drivers/virtio_blk.o \
+	$(BUILD_DIR)/drivers/virtio_gpu.o \
 	$(BUILD_DIR)/drivers/virtio_mmio.o \
 	$(BUILD_DIR)/drivers/virtio_rng.o \
 	$(BUILD_DIR)/fs/file.o \
+	$(BUILD_DIR)/fs/logfs.o \
 	$(BUILD_DIR)/fs/tinyfs.o \
 	$(BUILD_DIR)/fs/vfs.o \
+	$(BUILD_DIR)/graphics/framebuffer.o \
 	$(BUILD_DIR)/arch/aarch64/user_enter.o \
 	$(BUILD_DIR)/drivers/uart_pl011.o \
 	$(BUILD_DIR)/platform/qemu_virt/platform.o \
@@ -55,7 +58,7 @@ VIRTIO_BLK_IMG := $(BUILD_DIR)/virtio-blk.img
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 
-.PHONY: all clean run debug run-exception-test
+.PHONY: all clean run run-gfx run-gfx-headless debug run-exception-test
 
 all: $(KERNEL_ELF) $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 
@@ -106,6 +109,10 @@ $(BUILD_DIR)/drivers/virtio_blk.o: src/drivers/virtio_blk.c include/arch/aarch64
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/drivers/virtio_gpu.o: src/drivers/virtio_gpu.c include/arch/aarch64/mmu.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtqueue.h include/graphics/framebuffer.h include/kernel/kmalloc.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/drivers/virtio_mmio.o: src/drivers/virtio_mmio.c include/arch/aarch64/gic.h include/drivers/virtio.h include/drivers/virtio_mmio.h include/kernel/klog.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -118,11 +125,19 @@ $(BUILD_DIR)/fs/file.o: src/fs/file.c include/fs/file.h include/fs/vfs.h | $(BUI
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/fs/logfs.o: src/fs/logfs.c include/block/block_device.h include/fs/logfs.h include/kernel/klog.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/fs/tinyfs.o: src/fs/tinyfs.c include/block/block_device.h include/drivers/ramdisk.h include/fs/tinyfs.h include/kernel/console.h include/kernel/klog.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/fs/vfs.o: src/fs/vfs.c include/block/block_device.h include/fs/tinyfs.h include/fs/vfs.h include/kernel/klog.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/graphics/framebuffer.o: src/graphics/framebuffer.c include/graphics/framebuffer.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -232,8 +247,8 @@ $(BUILD_DIR)/tinyfs.img: Makefile tools/mktinyfs.py rootfs/hello.txt rootfs/motd
 $(BUILD_DIR)/tinyfs_blob.o: $(BUILD_DIR)/tinyfs.img
 	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
 
-$(VIRTIO_BLK_IMG): tools/mkvirtio_blk.py | $(BUILD_DIR)
-	$(PYTHON) tools/mkvirtio_blk.py $@
+$(VIRTIO_BLK_IMG): tools/mklogfs.py | $(BUILD_DIR)
+	$(PYTHON) tools/mklogfs.py $@
 
 $(KERNEL_ELF): $(OBJS) linker.ld
 	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
@@ -246,11 +261,36 @@ run: all
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-global virtio-mmio.force-legacy=false \
-		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,readonly=on,id=vdisk0 \
+		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,id=vdisk0 \
 		-nographic \
 		-serial mon:stdio \
 		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
+		-kernel $(KERNEL_ELF)
+
+run-gfx: all
+	qemu-system-aarch64 \
+		-M virt,gic-version=2 \
+		-cpu cortex-a53 \
+		-global virtio-mmio.force-legacy=false \
+		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,id=vdisk0 \
+		-serial mon:stdio \
+		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
+		-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
+		-device virtio-gpu-device,bus=virtio-mmio-bus.2 \
+		-kernel $(KERNEL_ELF)
+
+run-gfx-headless: all
+	qemu-system-aarch64 \
+		-M virt,gic-version=2 \
+		-cpu cortex-a53 \
+		-global virtio-mmio.force-legacy=false \
+		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,id=vdisk0 \
+		-display none \
+		-serial mon:stdio \
+		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
+		-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
+		-device virtio-gpu-device,bus=virtio-mmio-bus.2 \
 		-kernel $(KERNEL_ELF)
 
 run-exception-test:
@@ -260,7 +300,7 @@ run-exception-test:
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-global virtio-mmio.force-legacy=false \
-		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,readonly=on,id=vdisk0 \
+		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,id=vdisk0 \
 		-nographic \
 		-serial mon:stdio \
 		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
@@ -272,7 +312,7 @@ debug: all
 		-M virt,gic-version=2 \
 		-cpu cortex-a53 \
 		-global virtio-mmio.force-legacy=false \
-		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,readonly=on,id=vdisk0 \
+		-drive if=none,file=$(VIRTIO_BLK_IMG),format=raw,id=vdisk0 \
 		-nographic \
 		-serial mon:stdio \
 		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
