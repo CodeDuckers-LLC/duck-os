@@ -1,10 +1,16 @@
+#include "block/block_device.h"
 #include "arch/aarch64/cpu.h"
 #include "arch/aarch64/exceptions.h"
 #include "arch/aarch64/gic.h"
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
+#include "drivers/ramdisk.h"
 #include "drivers/virtio.h"
+#include "drivers/virtio_blk.h"
 #include "drivers/virtio_rng.h"
+#include "fs/file.h"
+#include "fs/tinyfs.h"
+#include "fs/vfs.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/initramfs.h"
@@ -421,6 +427,156 @@ static void test_virtio(void)
 {
     test_assert(virtio_device_count() >= 1U, "virtio device detected");
     test_assert(virtio_rng_available(), "virtio rng ready");
+    test_assert(virtio_blk_available(), "virtio blk ready");
+}
+
+static void test_virtio_blk(void)
+{
+    block_device_t *device;
+    unsigned char buffer[512];
+
+    device = block_find_device("vda");
+    test_assert(device != 0, "virtio blk device present");
+    test_assert(device->block_size == 512U, "virtio blk block size");
+    test_assert(device->block_count >= 32U, "virtio blk capacity");
+    test_assert(device->write_blocks == 0, "virtio blk read only");
+    test_assert(device->read_blocks(device, 0, 1, buffer) == 0, "virtio blk read block 0");
+    test_assert(memcmp(buffer, "DUCKBLK0", 8) == 0, "virtio blk block 0 magic");
+    test_assert(memcmp(buffer + 16, "virtio-blk demo block 0\n", 24) == 0, "virtio blk block 0 text");
+}
+
+static void test_ramdisk(void)
+{
+    block_device_t *device;
+    unsigned char write_buffer[RAMDISK_BLOCK_SIZE];
+    unsigned char read_buffer[RAMDISK_BLOCK_SIZE];
+    unsigned long test_block;
+    unsigned int i;
+
+    device = ramdisk_device();
+    test_assert(block_device_count() >= 1U, "block device detected");
+    test_assert(device != 0, "ramdisk device available");
+    test_assert(strcmp(device->name, "ram0") == 0, "ramdisk name");
+    test_assert(device->block_size == RAMDISK_BLOCK_SIZE, "ramdisk block size");
+    test_assert(device->block_count == RAMDISK_BLOCK_COUNT, "ramdisk block count");
+    test_assert(device->write_blocks != 0, "ramdisk write available");
+    test_assert(block_get_device(0) == device, "ramdisk registered first");
+
+    test_block = device->block_count - 1;
+
+    for (i = 0; i < RAMDISK_BLOCK_SIZE; i++)
+    {
+        write_buffer[i] = (unsigned char)(i & 0xffU);
+        read_buffer[i] = 0;
+    }
+
+    test_assert(device->write_blocks(device, test_block, 1, write_buffer) == 0, "ramdisk write block");
+    test_assert(device->read_blocks(device, test_block, 1, read_buffer) == 0, "ramdisk read block");
+    test_assert(memcmp(write_buffer, read_buffer, RAMDISK_BLOCK_SIZE) == 0, "ramdisk readback");
+    test_assert(device->read_blocks(device, RAMDISK_BLOCK_COUNT, 1, read_buffer) != 0,
+                "ramdisk bounds check");
+}
+
+static void test_tinyfs(void)
+{
+    const tinyfs_file_t *file;
+    unsigned char buffer[64];
+    int size;
+
+    test_assert(tinyfs_is_mounted(), "tinyfs mounted");
+    test_assert(tinyfs_device() == ramdisk_device(), "tinyfs device");
+    test_assert(tinyfs_file_count() >= 6U, "tinyfs file count");
+
+    file = tinyfs_find("hello.txt");
+    test_assert(file != 0, "tinyfs find hello.txt");
+    test_assert(file->size == 21U, "tinyfs hello.txt size");
+
+    size = tinyfs_read_file("hello.txt", buffer, sizeof(buffer));
+    test_assert(size == 21, "tinyfs read hello.txt");
+    test_assert(memcmp(buffer, "hello from deez nuts\n", 21) == 0, "tinyfs hello.txt contents");
+    test_assert(tinyfs_find("etc/motd") != 0, "tinyfs find etc/motd");
+    test_assert(tinyfs_find("bin/init") != 0, "tinyfs find bin/init");
+    test_assert(tinyfs_find("bin/hello.bin") != 0, "tinyfs find bin/hello.bin");
+    test_assert(tinyfs_find("missing.txt") == 0, "tinyfs missing file");
+}
+
+static void test_vfs(void)
+{
+    const vfs_file_info_t *file;
+    const vfs_file_info_t *directory;
+    unsigned char buffer[64];
+    int size;
+
+    test_assert(vfs_is_mounted(), "vfs mounted");
+    test_assert(strcmp(vfs_root_fs_name(), "tinyfs") == 0, "vfs root fs name");
+    test_assert(vfs_root_device() == ramdisk_device(), "vfs root device");
+    test_assert(vfs_root_file_count() >= 6U, "vfs root file count");
+    test_assert(vfs_list("/") == 0, "vfs list root");
+    test_assert(vfs_list("/bin") == 0, "vfs list /bin");
+    test_assert(vfs_list("/missing") != 0, "vfs list missing rejected");
+
+    file = vfs_stat("/hello.txt");
+    test_assert(file != 0, "vfs stat hello.txt");
+    test_assert(strcmp(file->name, "hello.txt") == 0, "vfs stat name");
+    test_assert(file->size == 21U, "vfs stat size");
+    directory = vfs_stat("/");
+    test_assert(directory != 0, "vfs stat root");
+    test_assert((directory->flags & VFS_FILE_FLAG_DIRECTORY) != 0, "vfs root is directory");
+    directory = vfs_stat("/etc");
+    test_assert(directory != 0, "vfs stat /etc");
+    test_assert((directory->flags & VFS_FILE_FLAG_DIRECTORY) != 0, "vfs /etc is directory");
+    test_assert(vfs_stat("/missing.txt") == 0, "vfs stat missing");
+
+    size = vfs_read_file("/hello.txt", buffer, sizeof(buffer));
+    test_assert(size == 21, "vfs read hello.txt");
+    test_assert(memcmp(buffer, "hello from deez nuts\n", 21) == 0, "vfs hello.txt contents");
+    size = vfs_read_file("/etc/motd", buffer, sizeof(buffer));
+    test_assert(size == 15, "vfs read /etc/motd");
+    test_assert(memcmp(buffer, "tinyfs says hi\n", 15) == 0, "vfs /etc/motd contents");
+    test_assert(vfs_read_file("/", buffer, sizeof(buffer)) < 0, "vfs read root rejected");
+    test_assert(vfs_read_file("/etc", buffer, sizeof(buffer)) < 0, "vfs read dir rejected");
+}
+
+static void test_file_layer(void)
+{
+    file_t *file;
+    unsigned char buffer[16];
+    int size;
+
+    file = file_open("/etc");
+    test_assert(file == 0, "file open dir rejected");
+
+    file = file_open("/etc/motd");
+    test_assert(file != 0, "file open motd");
+    test_assert(file->offset == 0U, "file open offset");
+
+    size = file_read(file, buffer, 6);
+    test_assert(size == 6, "file read chunk1");
+    test_assert(memcmp(buffer, "tinyfs", 6) == 0, "file read chunk1 contents");
+    test_assert(file->offset == 6U, "file offset advance");
+
+    size = file_read(file, buffer, 9);
+    test_assert(size == 9, "file read chunk2");
+    test_assert(memcmp(buffer, " says hi\n", 9) == 0, "file read chunk2 contents");
+    test_assert(file->offset == 15U, "file offset eof");
+
+    size = file_read(file, buffer, sizeof(buffer));
+    test_assert(size == 0, "file read eof");
+
+    test_assert(file_seek(file, 7) == 0, "file seek");
+    size = file_read(file, buffer, 4);
+    test_assert(size == 4, "file read after seek");
+    test_assert(memcmp(buffer, "says", 4) == 0, "file read after seek contents");
+
+    file_close(file);
+}
+
+static void test_user_file_loader(void)
+{
+    test_assert(vfs_stat("/bin/hello.bin") != 0, "user file present");
+    test_assert(user_run_file("/bin/hello.bin") == 0, "user file run");
+    test_assert(vfs_stat("/bin/hello.elf") != 0, "user elf file present");
+    test_assert(user_run_file("/bin/hello.elf") == 0, "user elf file run");
 }
 
 static void print_cpu_register_state(void)
@@ -466,6 +622,12 @@ void test_run_all(void)
     test_tasks();
     test_timer();
     test_virtio();
+    test_virtio_blk();
+    test_ramdisk();
+    test_tinyfs();
+    test_vfs();
+    test_file_layer();
+    test_user_file_loader();
     test_kprintf_smoke();
 
     kprintf("[TEST] SUMMARY: %u/%u passed\n",

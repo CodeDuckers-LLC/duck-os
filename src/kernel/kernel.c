@@ -3,11 +3,16 @@
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/cpu.h"
+#include "drivers/ramdisk.h"
+#include "drivers/virtio_blk.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_rng.h"
+#include "fs/tinyfs.h"
+#include "fs/vfs.h"
 #include "kernel/console.h"
 #include "kernel/initramfs.h"
 #include "kernel/klog.h"
+#include "kernel/panic.h"
 #include "kernel/shell.h"
 #include "kernel/test.h"
 #include "kernel/task.h"
@@ -37,10 +42,40 @@ static void print_hex32(unsigned long value)
     }
 }
 
+static int kernel_load_tinyfs_image(block_device_t *device)
+{
+    unsigned long image_size;
+    unsigned long block_count;
+
+    extern unsigned char _binary_build_tinyfs_img_start[];
+    extern unsigned char _binary_build_tinyfs_img_end[];
+
+    if (device == 0 || device->write_blocks == 0)
+    {
+        return -1;
+    }
+
+    image_size = (unsigned long)(_binary_build_tinyfs_img_end - _binary_build_tinyfs_img_start);
+    if (image_size == 0 || (image_size % device->block_size) != 0)
+    {
+        return -1;
+    }
+
+    block_count = image_size / device->block_size;
+    if (block_count > device->block_count)
+    {
+        return -1;
+    }
+
+    kprintf("[INFO] embedded tinyfs image size: %u bytes\n", (unsigned int)image_size);
+    return device->write_blocks(device, 0, block_count, _binary_build_tinyfs_img_start);
+}
+
 void kernel_main(void)
 {
     unsigned long ram_start;
     unsigned long ram_end;
+    block_device_t *ramdisk;
 
     console_init();
     sysreg_set_daif_irq();
@@ -63,6 +98,22 @@ void kernel_main(void)
     pmm_init();
     virtio_init();
     virtio_rng_init();
+    ramdisk_init();
+    virtio_blk_init();
+    ramdisk = ramdisk_device();
+    if (kernel_load_tinyfs_image(ramdisk) != 0)
+    {
+        panic("tinyfs image load failed");
+    }
+    if (tinyfs_mount(ramdisk) != 0)
+    {
+        panic("tinyfs mount failed");
+    }
+    klog_info("TinyFS mounted");
+    if (vfs_mount_root() != 0)
+    {
+        panic("vfs root mount failed");
+    }
     initramfs_init();
     task_init();
     test_run_all();

@@ -8,20 +8,44 @@ Project currently targets QEMU `virt` machine in AArch64 mode.
 
 ```sh
 qemu-system-aarch64 \
-  -M virt \
+  -M virt,gic-version=2 \
   -cpu cortex-a53 \
+  -global virtio-mmio.force-legacy=false \
+  -drive if=none,file=build/virtio-blk.img,format=raw,readonly=on,id=vdisk0 \
   -nographic \
   -serial mon:stdio \
+  -device virtio-rng-device,bus=virtio-mmio-bus.0 \
+  -device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
   -kernel build/kernel.elf
 ```
 
 Meaning:
 
-- `-M virt`: generic virtual ARM machine
+- `-M virt,gic-version=2`: generic virtual ARM machine with GICv2
 - `-cpu cortex-a53`: current CPU model
+- `-global virtio-mmio.force-legacy=false`: expose modern VirtIO MMIO transport
+- `-drive if=none,file=build/virtio-blk.img,format=raw,readonly=on,id=vdisk0`: create raw read-only disk backend
 - `-nographic`: no graphical window
 - `-serial mon:stdio`: UART and QEMU monitor share terminal
+- `-device virtio-rng-device,bus=virtio-mmio-bus.0`: attach one real VirtIO MMIO device
+- `-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1`: attach one read-only-test VirtIO block device
 - `-kernel build/kernel.elf`: load kernel image directly
+
+## VirtIO MMIO
+
+Kernel scans QEMU `virt` MMIO window at boot and prints discovered VirtIO devices:
+
+```text
+[INFO] virtio: slot 0 irq 48 device 4 vendor 0x554d4551
+[INFO] virtio: slot 1 irq 49 device 2 vendor 0x554d4551
+[INFO] virtio: detected 2 device(s)
+```
+
+After boot:
+
+- `virtio` dumps discovered devices
+- `blk` lists registered block devices
+- `blkread vda 0` dumps block 0 from test disk image
 
 ## Expected Output
 

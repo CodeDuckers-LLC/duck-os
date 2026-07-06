@@ -1,30 +1,8 @@
 #include "arch/aarch64/gic.h"
 #include "drivers/virtio.h"
+#include "drivers/virtio_mmio.h"
 #include "kernel/klog.h"
 #include "platform/platform.h"
-
-#define VIRTIO_MMIO_MAGIC_VALUE 0x000UL
-#define VIRTIO_MMIO_VERSION 0x004UL
-#define VIRTIO_MMIO_DEVICE_ID 0x008UL
-#define VIRTIO_MMIO_VENDOR_ID 0x00cUL
-#define VIRTIO_MMIO_DEVICE_FEATURES 0x010UL
-#define VIRTIO_MMIO_DEVICE_FEATURES_SEL 0x014UL
-#define VIRTIO_MMIO_DRIVER_FEATURES 0x020UL
-#define VIRTIO_MMIO_DRIVER_FEATURES_SEL 0x024UL
-#define VIRTIO_MMIO_QUEUE_SEL 0x030UL
-#define VIRTIO_MMIO_QUEUE_NUM_MAX 0x034UL
-#define VIRTIO_MMIO_QUEUE_NUM 0x038UL
-#define VIRTIO_MMIO_QUEUE_READY 0x044UL
-#define VIRTIO_MMIO_QUEUE_NOTIFY 0x050UL
-#define VIRTIO_MMIO_INTERRUPT_STATUS 0x060UL
-#define VIRTIO_MMIO_INTERRUPT_ACK 0x064UL
-#define VIRTIO_MMIO_STATUS 0x070UL
-#define VIRTIO_MMIO_QUEUE_DESC_LOW 0x080UL
-#define VIRTIO_MMIO_QUEUE_DESC_HIGH 0x084UL
-#define VIRTIO_MMIO_QUEUE_AVAIL_LOW 0x090UL
-#define VIRTIO_MMIO_QUEUE_AVAIL_HIGH 0x094UL
-#define VIRTIO_MMIO_QUEUE_USED_LOW 0x0a0UL
-#define VIRTIO_MMIO_QUEUE_USED_HIGH 0x0a4UL
 
 static struct virtio_mmio_device virtio_devices[32];
 static unsigned int virtio_device_total;
@@ -66,7 +44,13 @@ static void virtio_mmio_probe_slot(unsigned int slot)
     device->initialized = 0;
     device->irq_handler = 0;
     device->driver_data = 0;
+    device->status = 0;
+    device->driver_features[0] = 0;
+    device->driver_features[1] = 0;
+    device->device_id = VIRTIO_DEVICE_ID_INVALID;
+    device->vendor_id = 0;
 
+    /* Read common identity registers first. If these do not match, slot is empty. */
     magic = virtio_mmio_read32(device, VIRTIO_MMIO_MAGIC_VALUE);
     version = virtio_mmio_read32(device, VIRTIO_MMIO_VERSION);
     device_id = virtio_mmio_read32(device, VIRTIO_MMIO_DEVICE_ID);
@@ -87,6 +71,48 @@ static void virtio_mmio_probe_slot(unsigned int slot)
             device->irq,
             device->device_id,
             device->vendor_id);
+}
+
+void virtio_print_devices(void)
+{
+    unsigned int slot_count;
+    unsigned int slot;
+    unsigned int found;
+
+    slot_count = platform_get_virtio_mmio_count();
+    if (slot_count > (sizeof(virtio_devices) / sizeof(virtio_devices[0])))
+    {
+        slot_count = sizeof(virtio_devices) / sizeof(virtio_devices[0]);
+    }
+
+    found = 0;
+    for (slot = 0; slot < slot_count; slot++)
+    {
+        struct virtio_mmio_device *device;
+
+        device = &virtio_devices[slot];
+        if (!device->present)
+        {
+            continue;
+        }
+
+        kprintf("slot=%u base=%p irq=%u device=%u vendor=0x%x init=%u\n",
+                device->slot,
+                (void *)device->base,
+                device->irq,
+                device->device_id,
+                device->vendor_id,
+                (unsigned int)device->initialized);
+        found++;
+    }
+
+    if (found == 0U)
+    {
+        kprintf("virtio: no devices\n");
+        return;
+    }
+
+    kprintf("virtio: total=%u\n", found);
 }
 
 void virtio_init(void)

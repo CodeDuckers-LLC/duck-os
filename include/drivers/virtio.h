@@ -1,12 +1,14 @@
 #ifndef DRIVERS_VIRTIO_H
 #define DRIVERS_VIRTIO_H
 
+#include "drivers/virtio_mmio.h"
 #include "drivers/virtqueue.h"
 
 #define VIRTIO_MMIO_MAGIC 0x74726976U
 #define VIRTIO_MMIO_VERSION_MODERN 2U
 
 #define VIRTIO_DEVICE_ID_INVALID 0U
+#define VIRTIO_DEVICE_ID_BLOCK 2U
 #define VIRTIO_DEVICE_ID_RNG 4U
 
 #define VIRTIO_STATUS_ACKNOWLEDGE 0x01U
@@ -44,18 +46,7 @@ void virtio_enable_irqs(void);
 void virtio_handle_irq(unsigned int irq_id);
 unsigned int virtio_device_count(void);
 struct virtio_mmio_device *virtio_find_device(unsigned int device_id, unsigned int instance_index);
-unsigned int virtio_mmio_read32(const struct virtio_mmio_device *device, unsigned long offset);
-void virtio_mmio_write32(const struct virtio_mmio_device *device, unsigned long offset, unsigned int value);
-int virtio_mmio_begin_init(struct virtio_mmio_device *device);
-int virtio_mmio_negotiate_features(struct virtio_mmio_device *device,
-                                   unsigned int feature_page0,
-                                   unsigned int feature_page1);
-int virtio_mmio_setup_queue(struct virtio_mmio_device *device,
-                            unsigned int queue_index,
-                            struct virtqueue *queue);
-void virtio_mmio_notify_queue(const struct virtio_mmio_device *device, unsigned int queue_index);
-void virtio_mmio_finish_init(struct virtio_mmio_device *device);
-void virtio_mmio_fail(struct virtio_mmio_device *device);
+void virtio_print_devices(void);
 void virtio_mmio_set_irq_handler(struct virtio_mmio_device *device,
                                  virtio_irq_fn irq_handler,
                                  void *driver_data);
