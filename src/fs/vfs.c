@@ -254,6 +254,66 @@ int vfs_list(const char *path)
     return 0;
 }
 
+int vfs_list_entries(const char *path, vfs_list_entry_fn_t callback, void *context)
+{
+    char normalized[VFS_PATH_MAX];
+    char seen[TINYFS_MAX_FILES][VFS_PATH_MAX];
+    char entry_name[VFS_PATH_MAX];
+    vfs_file_info_t info;
+    unsigned int seen_count;
+    unsigned int index;
+
+    if (!vfs_ready || callback == 0 || vfs_normalize_path(path, normalized, 1) != 0 || !vfs_directory_exists(normalized))
+    {
+        return -1;
+    }
+
+    seen_count = 0;
+    for (index = 0; index < tinyfs_file_count(); index++)
+    {
+        const tinyfs_file_t *file;
+        const char *child_name;
+        unsigned int child_length;
+        int is_directory;
+
+        file = tinyfs_get_file(index);
+        if (file == 0)
+        {
+            continue;
+        }
+
+        if (!vfs_collect_child_name(normalized,
+                                    file->name,
+                                    &child_name,
+                                    &child_length,
+                                    &is_directory))
+        {
+            continue;
+        }
+
+        if (vfs_name_seen(seen, seen_count, child_name, child_length))
+        {
+            continue;
+        }
+
+        memcpy(seen[seen_count], child_name, child_length);
+        seen[seen_count][child_length] = '\0';
+        seen_count++;
+
+        memcpy(entry_name, child_name, child_length);
+        entry_name[child_length] = '\0';
+        info.name = entry_name;
+        info.size = is_directory ? 0U : file->size;
+        info.flags = is_directory ? VFS_FILE_FLAG_DIRECTORY : file->flags;
+        if (callback(&info, context) != 0)
+        {
+            break;
+        }
+    }
+
+    return 0;
+}
+
 const vfs_file_info_t *vfs_stat(const char *path)
 {
     const tinyfs_file_t *file;

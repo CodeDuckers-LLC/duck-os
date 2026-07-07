@@ -30,5 +30,29 @@ void gui_destroy_window(unsigned int id);
 void gui_draw_all(void);
 void gui_attach_framebuffer(framebuffer_t *fb);
 framebuffer_t *gui_framebuffer(void);
+int gui_window_content_x(const window_t *window);
+int gui_window_content_y(const window_t *window);
+unsigned int gui_window_content_width(const window_t *window);
+unsigned int gui_window_content_height(const window_t *window);
+void gui_draw_panel(framebuffer_t *fb,
+                    int x,
+                    int y,
+                    unsigned int width,
+                    unsigned int height,
+                    unsigned int bg_color,
+                    unsigned int border_color);
+void gui_draw_label(framebuffer_t *fb,
+                    int x,
+                    int y,
+                    const char *text,
+                    unsigned int fg_color,
+                    unsigned int bg_color);
+void gui_draw_button(framebuffer_t *fb,
+                     int x,
+                     int y,
+                     unsigned int width,
+                     unsigned int height,
+                     const char *text,
+                     int pressed);
 
 #endif

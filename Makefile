@@ -6,6 +6,9 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 PYTHON ?= python3
 
 BUILD_DIR := build
+ROOTFS_DIR := rootfs
+ROOTFS_STAGING_DIR := $(BUILD_DIR)/rootfs
+ROOTFS_FILES := $(shell find $(ROOTFS_DIR) -type f | sort)
 
 CFLAGS := -Wall -Wextra -O2 -ffreestanding -nostdlib -nostartfiles -mgeneral-regs-only -Iinclude
 LDFLAGS := -T linker.ld -nostdlib
@@ -27,12 +30,19 @@ OBJS := \
 	$(BUILD_DIR)/drivers/virtio_input.o \
 	$(BUILD_DIR)/drivers/virtio_mmio.o \
 	$(BUILD_DIR)/drivers/virtio_rng.o \
+	$(BUILD_DIR)/desktop/desktop.o \
+	$(BUILD_DIR)/desktop/desktop_app.o \
+	$(BUILD_DIR)/desktop/desktop_event.o \
+	$(BUILD_DIR)/desktop/desktop_input.o \
+	$(BUILD_DIR)/desktop/desktop_window.o \
 	$(BUILD_DIR)/fs/file.o \
 	$(BUILD_DIR)/fs/logfs.o \
 	$(BUILD_DIR)/fs/tinyfs.o \
 	$(BUILD_DIR)/fs/vfs.o \
 	$(BUILD_DIR)/gfx/draw.o \
 	$(BUILD_DIR)/gfx/cursor.o \
+	$(BUILD_DIR)/gui/app_file_browser.o \
+	$(BUILD_DIR)/gui/app_text_viewer.o \
 	$(BUILD_DIR)/gui/gui.o \
 	$(BUILD_DIR)/gfx/font8x8.o \
 	$(BUILD_DIR)/gfx/framebuffer.o \
@@ -66,7 +76,7 @@ VIRTIO_BLK_IMG := $(BUILD_DIR)/virtio-blk.img
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 
-.PHONY: all clean run run-gfx run-gfx-headless debug run-exception-test
+.PHONY: all clean run run-gfx run-gfx-headless debug run-exception-test rootfs
 
 all: $(KERNEL_ELF) $(KERNEL_BIN) $(VIRTIO_BLK_IMG)
 
@@ -137,6 +147,26 @@ $(BUILD_DIR)/drivers/virtio_rng.o: src/drivers/virtio_rng.c include/arch/aarch64
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/desktop.h include/desktop/desktop_app.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/desktop_app.o: src/desktop/desktop_app.c include/desktop/desktop_app.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/desktop_event.o: src/desktop/desktop_event.c include/desktop/desktop_event.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/desktop_input.o: src/desktop/desktop_input.c include/desktop/desktop_input.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/desktop_window.o: src/desktop/desktop_window.c include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/fs/file.o: src/fs/file.c include/fs/file.h include/fs/vfs.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -162,6 +192,14 @@ $(BUILD_DIR)/gfx/draw.o: src/gfx/draw.c include/gfx/draw.h include/gfx/framebuff
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/gfx/cursor.o: src/gfx/cursor.c include/gfx/cursor.h include/gfx/framebuffer.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gui/app_file_browser.o: src/gui/app_file_browser.c include/drivers/virtio_gpu.h include/fs/vfs.h include/gfx/font.h include/gui/app_file_browser.h include/gui/gui.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gui/app_text_viewer.o: src/gui/app_text_viewer.c include/drivers/virtio_gpu.h include/fs/file.h include/fs/vfs.h include/gfx/font.h include/gui/app_text_viewer.h include/gui/gui.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -221,7 +259,7 @@ $(BUILD_DIR)/kernel/panic.o: src/kernel/panic.c include/arch/aarch64/cpu.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/gui/gui.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/desktop/desktop.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/gui/app_file_browser.h include/gui/app_text_viewer.h include/gui/gui.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -276,13 +314,15 @@ $(BUILD_DIR)/initramfs.img: tools/mkinitramfs.py initramfs/hello.txt initramfs/m
 $(BUILD_DIR)/initramfs_blob.o: $(BUILD_DIR)/initramfs.img
 	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@
 
-$(BUILD_DIR)/tinyfs.img: Makefile tools/mktinyfs.py rootfs/hello.txt rootfs/motd.txt rootfs/bin/init rootfs/etc/motd rootfs/home/readme.txt $(BUILD_DIR)/user/hello.bin $(BUILD_DIR)/user/hello.elf | $(BUILD_DIR)
-	rm -rf $(BUILD_DIR)/rootfs
-	mkdir -p $(BUILD_DIR)/rootfs/bin
-	cp -R rootfs/. $(BUILD_DIR)/rootfs/
-	cp $(BUILD_DIR)/user/hello.bin $(BUILD_DIR)/rootfs/bin/hello.bin
-	cp $(BUILD_DIR)/user/hello.elf $(BUILD_DIR)/rootfs/bin/hello.elf
-	$(PYTHON) tools/mktinyfs.py $@ $(BUILD_DIR)/rootfs
+rootfs: $(BUILD_DIR)/tinyfs.img
+
+$(BUILD_DIR)/tinyfs.img: Makefile tools/mktinyfs.py $(ROOTFS_FILES) $(BUILD_DIR)/user/hello.bin $(BUILD_DIR)/user/hello.elf | $(BUILD_DIR)
+	rm -rf $(ROOTFS_STAGING_DIR)
+	mkdir -p $(ROOTFS_STAGING_DIR)/bin
+	cp -R $(ROOTFS_DIR)/. $(ROOTFS_STAGING_DIR)/
+	cp $(BUILD_DIR)/user/hello.bin $(ROOTFS_STAGING_DIR)/bin/hello.bin
+	cp $(BUILD_DIR)/user/hello.elf $(ROOTFS_STAGING_DIR)/bin/hello.elf
+	$(PYTHON) tools/mktinyfs.py $@ $(ROOTFS_STAGING_DIR)
 
 $(BUILD_DIR)/tinyfs_blob.o: $(BUILD_DIR)/tinyfs.img
 	$(OBJCOPY) -I binary -O elf64-littleaarch64 -B aarch64 $< $@

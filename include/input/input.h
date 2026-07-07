@@ -12,6 +12,7 @@
 #define INPUT_KEY_REPEAT 2U
 
 #define INPUT_KEY_1 2U
+#define INPUT_KEY_ESC 1U
 #define INPUT_KEY_2 3U
 #define INPUT_KEY_3 4U
 #define INPUT_KEY_4 5U
@@ -64,6 +65,11 @@
 #define INPUT_KEY_SLASH 53U
 #define INPUT_KEY_RIGHTSHIFT 54U
 #define INPUT_KEY_SPACE 57U
+#define INPUT_KEY_UP 103U
+#define INPUT_KEY_LEFT 105U
+#define INPUT_KEY_RIGHT 106U
+#define INPUT_KEY_DOWN 108U
+#define INPUT_KEY_MOUSE_LEFT 272U
 
 typedef union input_event_data
 {

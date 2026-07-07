@@ -759,7 +759,7 @@ static void test_vfs(void)
     device = vfs_root_device();
     test_assert(device != 0, "vfs root device");
     test_assert(device == tinyfs_device(), "vfs root matches tinyfs device");
-    test_assert(vfs_root_file_count() >= 6U, "vfs root file count");
+    test_assert(vfs_root_file_count() >= 7U, "vfs root file count");
     test_assert(vfs_list("/") == 0, "vfs list root");
     test_assert(vfs_list("/bin") == 0, "vfs list /bin");
     test_assert(vfs_list("/missing") != 0, "vfs list missing rejected");
@@ -780,8 +780,9 @@ static void test_vfs(void)
     test_assert(size == 21, "vfs read hello.txt");
     test_assert(memcmp(buffer, "hello from deez nuts\n", 21) == 0, "vfs hello.txt contents");
     size = vfs_read_file("/etc/motd", buffer, sizeof(buffer));
-    test_assert(size == 15, "vfs read /etc/motd");
-    test_assert(memcmp(buffer, "tinyfs says hi\n", 15) == 0, "vfs /etc/motd contents");
+    test_assert(size == 49, "vfs read /etc/motd");
+    test_assert(memcmp(buffer, "Welcome to duck-os.\nTinyFS is mounted and ready.\n", 49) == 0,
+                "vfs /etc/motd contents");
     test_assert(vfs_read_file("/", buffer, sizeof(buffer)) < 0, "vfs read root rejected");
     test_assert(vfs_read_file("/etc", buffer, sizeof(buffer)) < 0, "vfs read dir rejected");
 }
@@ -849,21 +850,22 @@ static void test_file_layer(void)
 
     size = file_read(file, buffer, 6);
     test_assert(size == 6, "file read chunk1");
-    test_assert(memcmp(buffer, "tinyfs", 6) == 0, "file read chunk1 contents");
+    test_assert(memcmp(buffer, "Welcom", 6) == 0, "file read chunk1 contents");
     test_assert(file->offset == 6U, "file offset advance");
 
     size = file_read(file, buffer, 9);
     test_assert(size == 9, "file read chunk2");
-    test_assert(memcmp(buffer, " says hi\n", 9) == 0, "file read chunk2 contents");
+    test_assert(memcmp(buffer, "e to duck", 9) == 0, "file read chunk2 contents");
     test_assert(file->offset == 15U, "file offset eof");
 
+    test_assert(file_seek(file, file->size) == 0, "file seek eof");
     size = file_read(file, buffer, sizeof(buffer));
     test_assert(size == 0, "file read eof");
 
-    test_assert(file_seek(file, 7) == 0, "file seek");
+    test_assert(file_seek(file, 11) == 0, "file seek");
     size = file_read(file, buffer, 4);
     test_assert(size == 4, "file read after seek");
-    test_assert(memcmp(buffer, "says", 4) == 0, "file read after seek contents");
+    test_assert(memcmp(buffer, "duck", 4) == 0, "file read after seek contents");
 
     file_close(file);
 }

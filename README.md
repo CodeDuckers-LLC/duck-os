@@ -9,8 +9,10 @@ Current state:
 - Boots with custom `_start` entry point
 - Writes log messages over PL011 UART
 - Supports polling-based PL011 UART input
-- Provides tiny UART shell
+- Provides shell with VFS, graphics, and GUI demo commands
 - Embeds tiny read-only initramfs image
+- Mounts TinyFS through VFS as root filesystem
+- Reads boot config from `/etc/hostname`, `/etc/motd`, and optional `/etc/theme`
 - Installs minimal EL1 exception vector table when booted at EL1
 - Enables minimal EL1 MMU identity mapping
 - Handles periodic EL1 physical timer interrupts through QEMU `virt` GICv2
@@ -21,7 +23,6 @@ Project does not yet provide:
 - Broad interrupt handling beyond generic timer bring-up
 - Dynamic memory allocation
 - Process or task scheduling
-- Filesystems
 - User space
 
 ## Requirements
@@ -109,6 +110,10 @@ ram:      0x40000000 - 0x48000000
 [INFO] pmm: total pages: 32768
 [INFO] pmm: used pages: ...
 [INFO] pmm: free pages: ...
+[INFO] rootfs: mounted tinyfs from ...
+[INFO] vfs: root mounted fs=tinyfs device=...
+hostname: duck-os
+motd: tinyfs says hi
 [INFO] kernel tests: start
 [INFO] AArch64 system registers:
   CurrentEL: 0x4 (EL1)
@@ -167,12 +172,24 @@ timer interrupts active: GICv2, period 1000 ms
 [INFO] IRQ unmasked
 [INFO] shell ready
 >help
-help
-version
-mem
-uptime
-ticks
-panic
+duck-os shell commands
+
+filesystem:
+  pwd
+  ls [path]
+  cat <path>
+  stat <path>
+  hexdump <path>
+  fsinfo
+
+graphics and gui:
+  ginfo
+  gclear
+  gtest
+  gpudemo
+  gui demo
+  gui files [index]
+  gui view <path>
 >uptime
 uptime: 4.322 s
 >ticks

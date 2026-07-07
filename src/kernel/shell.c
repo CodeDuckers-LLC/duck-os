@@ -1,5 +1,6 @@
 #include "drivers/pci.h"
 #include "block/block_device.h"
+#include "desktop/desktop.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_gpu.h"
 #include "fs/file.h"
@@ -9,6 +10,8 @@
 #include "gfx/draw.h"
 #include "gfx/framebuffer.h"
 #include "gfx/font.h"
+#include "gui/app_file_browser.h"
+#include "gui/app_text_viewer.h"
 #include "gui/gui.h"
 #include "kernel/console.h"
 #include "kernel/input.h"
@@ -26,48 +29,77 @@
 #define SHELL_LINE_MAX 64
 #define SHELL_FILE_BUFFER_MAX 128
 #define SHELL_BLOCK_DUMP_BYTES 512
+#define SHELL_HEXDUMP_BYTES_PER_LINE 16U
 #define KERNEL_VERSION "duck-os"
 
 static const char *shell_read_token(const char *text, char *buffer, unsigned long buffer_size);
 static int shell_parse_unsigned_long(const char *text, unsigned long *value_out);
 static void shell_dump_hex_line(unsigned long offset, const unsigned char *buffer, unsigned int count);
 static const char *shell_skip_spaces(const char *text);
+static int shell_command_matches(const char *line, const char *command);
+static void shell_print_hex_byte(unsigned char value);
+static void shell_print_path_error(const char *action, const char *path);
 static void shell_run_gfx_test(void);
 static void shell_set_console_mode(const char *mode);
 static void shell_set_input_mode(const char *mode);
 static void shell_move_cursor(const char *args);
 static void shell_run_gui_demo(void);
+static void shell_run_gui_files(const char *args);
+static void shell_run_gui_view(const char *args);
+static void shell_run_desktop(const char *args);
+static int shell_list_entry(const vfs_file_info_t *entry, void *context);
 
 static void shell_print_help(void)
 {
-    kprintf("help\n");
-    kprintf("version\n");
-    kprintf("ls\n");
-    kprintf("cat <file>\n");
-    kprintf("run <file>\n");
-    kprintf("runelf <file>\n");
-    kprintf("mem\n");
-    kprintf("uptime\n");
-    kprintf("ticks\n");
-    kprintf("blk\n");
-    kprintf("blkread <device> <block>\n");
-    kprintf("fsinfo\n");
-    kprintf("gpuinfo\n");
-    kprintf("gpudemo\n");
-    kprintf("cursor <x> <y>\n");
-    kprintf("gui demo\n");
-    kprintf("console [serial|graphics|both]\n");
-    kprintf("input [serial|keyboard|both]\n");
-    kprintf("gtest\n");
-    kprintf("logls\n");
-    kprintf("logcat <file>\n");
-    kprintf("logcreate <file>\n");
-    kprintf("logappend <file> <text>\n");
-    kprintf("logfsinfo\n");
-    kprintf("pci\n");
-    kprintf("virtio\n");
-    kprintf("rng\n");
-    kprintf("panic\n");
+    kprintf("duck-os shell commands\n");
+    kprintf("\n");
+    kprintf("filesystem:\n");
+    kprintf("  help                 show this command reference\n");
+    kprintf("  pwd                  print the current directory\n");
+    kprintf("  ls [path]            list files in / or in a directory\n");
+    kprintf("  cat <path>           print a text file to the console\n");
+    kprintf("  stat <path>          show file type, size, and canonical path\n");
+    kprintf("  hexdump <path>       print file contents in hex + ascii\n");
+    kprintf("  fsinfo               show mounted root filesystem details\n");
+    kprintf("\n");
+    kprintf("graphics and gui:\n");
+    kprintf("  ginfo                show framebuffer and gpu details\n");
+    kprintf("  gclear               clear the graphics framebuffer\n");
+    kprintf("  gtest                run an in-memory framebuffer self-test\n");
+    kprintf("  gpudemo              redraw the built-in graphics demo\n");
+    kprintf("  cursor <x> <y>       move the graphics cursor\n");
+    kprintf("  desktop [once]       run desktop mode or draw one frame\n");
+    kprintf("  gui demo             draw demo GUI windows\n");
+    kprintf("  gui files [index]    open the file browser and preselect an entry\n");
+    kprintf("  gui view <path>      open a text file in the GUI viewer\n");
+    kprintf("  console [mode]       show or set output: serial|graphics|both\n");
+    kprintf("  input [mode]         show or set input: serial|keyboard|both\n");
+    kprintf("\n");
+    kprintf("system:\n");
+    kprintf("  version              print kernel version\n");
+    kprintf("  mem                  show RAM, heap, and PMM usage\n");
+    kprintf("  uptime               show time since boot\n");
+    kprintf("  ticks                show timer interrupt count\n");
+    kprintf("  blk                  list block devices\n");
+    kprintf("  blkread <dev> <n>    dump one block from a device\n");
+    kprintf("  pci                  list PCI devices\n");
+    kprintf("  virtio               list virtio devices\n");
+    kprintf("  rng                  read a few random bytes\n");
+    kprintf("\n");
+    kprintf("programs and logs:\n");
+    kprintf("  run <path>           run a user program image\n");
+    kprintf("  runelf <path>        run a user ELF image\n");
+    kprintf("  logls                list logfs files\n");
+    kprintf("  logcat <file>        print a logfs file\n");
+    kprintf("  logcreate <file>     create an empty logfs file\n");
+    kprintf("  logappend <f> <txt>  append text to a logfs file\n");
+    kprintf("  logfsinfo            show logfs mount details\n");
+    kprintf("\n");
+    kprintf("debug:\n");
+    kprintf("  panic                trigger a kernel panic\n");
+    kprintf("\n");
+    kprintf("aliases:\n");
+    kprintf("  gpuinfo -> ginfo\n");
 }
 
 static void shell_print_version(void)
@@ -137,6 +169,7 @@ static void shell_print_block_devices(void)
 static void shell_print_fsinfo(void)
 {
     block_device_t *device;
+    const vfs_file_info_t *root;
 
     if (!vfs_is_mounted())
     {
@@ -145,12 +178,17 @@ static void shell_print_fsinfo(void)
     }
 
     device = vfs_root_device();
+    root = vfs_stat("/");
 
     kprintf("fs: %s\n", vfs_root_fs_name());
     kprintf("backing device: %s\n", device->name);
     kprintf("access: ro\n");
     kprintf("files: %u\n", vfs_root_file_count());
     kprintf("mount: /\n");
+    if (root != 0)
+    {
+        kprintf("root type: directory\n");
+    }
 }
 
 static void shell_print_rng(void)
@@ -199,7 +237,30 @@ static void shell_print_gpuinfo(void)
     kprintf("gpu: virtio-gpu\n");
     kprintf("resolution: %u x %u\n", virtio_gpu_width(), virtio_gpu_height());
     kprintf("pitch: %u\n", fb->pitch);
+    kprintf("bytes/pixel: %u\n", fb->bytes_per_pixel);
+    kprintf("framebuffer: %p\n", (void *)fb->buffer);
     kprintf("format: b8g8r8a8\n");
+}
+
+static void shell_clear_graphics(void)
+{
+    framebuffer_t *fb;
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    fb_clear(fb, 0xff102030U);
+    if (virtio_gpu_flush() != 0)
+    {
+        kprintf("gclear failed\n");
+        return;
+    }
+
+    kprintf("graphics framebuffer cleared\n");
 }
 
 static void shell_run_gpu_demo(void)
@@ -419,15 +480,16 @@ static void shell_move_cursor(const char *args)
 
 static void shell_gui_demo_status_draw(window_t *window, framebuffer_t *fb)
 {
-    int text_x;
-    int text_y;
+    int x;
+    int y;
 
-    text_x = window->x + 8;
-    text_y = window->y + GFX_FONT_HEIGHT + 10;
-    gfx_draw_string(fb, text_x, text_y, "duck-os compositor", 0xff102030U, 0xffd9e2ecU);
-    gfx_draw_string(fb, text_x, text_y + 12, "immediate-mode demo", 0xff102030U, 0xffd9e2ecU);
-    draw_fill_rect(fb, text_x, text_y + 28, 96, 10, 0xff2dce89U);
-    draw_rect(fb, text_x, text_y + 28, 128, 10, 0xff101010U);
+    x = gui_window_content_x(window);
+    y = gui_window_content_y(window);
+    gui_draw_panel(fb, x, y, gui_window_content_width(window), 56U, 0xffeef4f8U, 0xff7b8fa1U);
+    gui_draw_label(fb, x + 8, y + 8, "duck-os compositor", 0xff102030U, 0xffeef4f8U);
+    gui_draw_label(fb, x + 8, y + 22, "immediate-mode widgets", 0xff355c7dU, 0xffeef4f8U);
+    gui_draw_button(fb, x + 8, y + 36, 72U, 18U, "Launch", 0);
+    gui_draw_button(fb, x + 88, y + 36, 72U, 18U, "Busy", 1);
 }
 
 static void shell_gui_demo_log_draw(window_t *window, framebuffer_t *fb)
@@ -435,12 +497,14 @@ static void shell_gui_demo_log_draw(window_t *window, framebuffer_t *fb)
     int x;
     int y;
 
-    x = window->x + 8;
-    y = window->y + GFX_FONT_HEIGHT + 10;
-    draw_fill_rect(fb, x, y, (int)window->width - 16, (int)window->height - 24, 0xfff4efe6U);
-    gfx_draw_string(fb, x + 8, y + 8, "[ok] framebuffer online", 0xff3b2f2fU, 0xfff4efe6U);
-    gfx_draw_string(fb, x + 8, y + 20, "[ok] text rendering online", 0xff3b2f2fU, 0xfff4efe6U);
-    gfx_draw_string(fb, x + 8, y + 32, "[ok] cursor layer online", 0xff3b2f2fU, 0xfff4efe6U);
+    x = gui_window_content_x(window);
+    y = gui_window_content_y(window);
+    gui_draw_panel(fb, x, y, gui_window_content_width(window), gui_window_content_height(window), 0xfff4efe6U, 0xff9d7f67U);
+    gui_draw_label(fb, x + 8, y + 8, "[ok] framebuffer online", 0xff3b2f2fU, 0xfff4efe6U);
+    gui_draw_label(fb, x + 8, y + 20, "[ok] text rendering online", 0xff3b2f2fU, 0xfff4efe6U);
+    gui_draw_label(fb, x + 8, y + 32, "[ok] cursor layer online", 0xff3b2f2fU, 0xfff4efe6U);
+    gui_draw_button(fb, x + 8, y + 52, 96U, 18U, "Refresh", 0);
+    gui_draw_button(fb, x + 112, y + 52, 80U, 18U, "Close", 0);
 }
 
 static void shell_run_gui_demo(void)
@@ -491,6 +555,112 @@ static void shell_run_gui_demo(void)
     gui_draw_all();
     console_set_output_mode(CONSOLE_SINK_SERIAL);
     kprintf("gui demo drawn on graphics display; shell output moved to serial\n");
+}
+
+static void shell_run_gui_files(const char *args)
+{
+    framebuffer_t *fb;
+    unsigned long selected_index;
+
+    selected_index = 0UL;
+    if (*args != '\0' && shell_parse_unsigned_long(args, &selected_index) != 0)
+    {
+        kprintf("usage: gui files [index]\n");
+        return;
+    }
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    gui_attach_framebuffer(fb);
+    if (app_file_browser_open((unsigned int)selected_index) != 0)
+    {
+        kprintf("gui files failed\n");
+        return;
+    }
+
+    console_set_output_mode(CONSOLE_SINK_SERIAL);
+    kprintf("gui files drawn on graphics display; shell output moved to serial\n");
+}
+
+static void shell_run_gui_view(const char *args)
+{
+    framebuffer_t *fb;
+
+    if (*args == '\0')
+    {
+        kprintf("usage: gui view <path>\n");
+        return;
+    }
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    gui_attach_framebuffer(fb);
+    if (app_text_viewer_open(args) != 0)
+    {
+        kprintf("gui view failed: %s\n", args);
+        return;
+    }
+
+    console_set_output_mode(CONSOLE_SINK_SERIAL);
+    kprintf("gui view drawn on graphics display; shell output moved to serial\n");
+}
+
+static void shell_run_desktop(const char *args)
+{
+    framebuffer_t *fb;
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    if (desktop_init() != 0)
+    {
+        kprintf("desktop init failed\n");
+        return;
+    }
+
+    if (strcmp(args, "once") == 0)
+    {
+        if (desktop_enter() != 0)
+        {
+            kprintf("desktop enter failed\n");
+            return;
+        }
+
+        desktop_run_once();
+        desktop_exit();
+        kprintf("desktop frame drawn on graphics display\n");
+        return;
+    }
+
+    if (*args != '\0')
+    {
+        kprintf("usage: desktop [once]\n");
+        return;
+    }
+
+    if (desktop_enter() != 0)
+    {
+        kprintf("desktop enter failed\n");
+        return;
+    }
+
+    kprintf("desktop mode active; press Escape to exit\n");
+    desktop_run();
+    kprintf("desktop mode exited\n");
 }
 
 static void shell_print_logfsinfo(void)
@@ -694,6 +864,19 @@ static int shell_starts_with(const char *text, const char *prefix)
     return 1;
 }
 
+static int shell_command_matches(const char *line, const char *command)
+{
+    unsigned long length;
+
+    length = strlen(command);
+    if (!shell_starts_with(line, command))
+    {
+        return 0;
+    }
+
+    return line[length] == '\0' || line[length] == ' ';
+}
+
 static const char *shell_skip_spaces(const char *text)
 {
     while (*text == ' ')
@@ -766,21 +949,63 @@ static int shell_parse_unsigned_long(const char *text, unsigned long *value_out)
     return 0;
 }
 
+static void shell_print_hex_byte(unsigned char value)
+{
+    static const char digits[] = "0123456789abcdef";
+
+    console_putc(digits[(value >> 4) & 0x0fU]);
+    console_putc(digits[value & 0x0fU]);
+}
+
 static void shell_dump_hex_line(unsigned long offset, const unsigned char *buffer, unsigned int count)
 {
     unsigned int index;
+    unsigned int padding;
 
     kprintf("%x:", (unsigned int)offset);
     for (index = 0; index < count; index++)
     {
-        kprintf(" %x", (unsigned int)buffer[index]);
+        console_putc(' ');
+        shell_print_hex_byte(buffer[index]);
     }
-    kprintf("\n");
+    for (padding = count; padding < SHELL_HEXDUMP_BYTES_PER_LINE; padding++)
+    {
+        kprintf("   ");
+    }
+
+    kprintf("  |");
+    for (index = 0; index < count; index++)
+    {
+        unsigned char ch;
+
+        ch = buffer[index];
+        if (ch >= 32U && ch <= 126U)
+        {
+            console_putc((char)ch);
+        }
+        else
+        {
+            console_putc('.');
+        }
+    }
+    kprintf("|\n");
+}
+
+static void shell_print_path_error(const char *action, const char *path)
+{
+    if (path == 0 || *path == '\0')
+    {
+        kprintf("%s failed\n", action);
+        return;
+    }
+
+    kprintf("%s failed: %s\n", action, path);
 }
 
 static void shell_list_files(const char *path)
 {
     const char *list_path;
+    const vfs_file_info_t *info;
 
     list_path = path;
     if (list_path == 0 || *list_path == '\0')
@@ -788,10 +1013,44 @@ static void shell_list_files(const char *path)
         list_path = "/";
     }
 
-    if (vfs_list(list_path) != 0)
+    info = vfs_stat(list_path);
+    if (info == 0)
     {
-        kprintf("list failed\n");
+        shell_print_path_error("ls", list_path);
+        return;
     }
+
+    if ((info->flags & VFS_FILE_FLAG_DIRECTORY) == 0U)
+    {
+        kprintf("%s\n", info->name);
+        return;
+    }
+
+    if (vfs_list_entries(list_path, shell_list_entry, 0) != 0)
+    {
+        shell_print_path_error("ls", list_path);
+    }
+}
+
+static int shell_list_entry(const vfs_file_info_t *entry, void *context)
+{
+    (void)context;
+
+    if (entry == 0)
+    {
+        return -1;
+    }
+
+    if ((entry->flags & VFS_FILE_FLAG_DIRECTORY) != 0U)
+    {
+        kprintf("%s/\n", entry->name);
+    }
+    else
+    {
+        kprintf("%s\n", entry->name);
+    }
+
+    return 0;
 }
 
 static void shell_cat_file(const char *name)
@@ -805,14 +1064,14 @@ static void shell_cat_file(const char *name)
 
     if (*name == '\0')
     {
-        kprintf("usage: cat <file>\n");
+        kprintf("usage: cat <path>\n");
         return;
     }
 
     file = file_open(name);
     if (file == 0)
     {
-        kprintf("file not found: %s\n", name);
+        shell_print_path_error("cat", name);
         return;
     }
 
@@ -823,7 +1082,7 @@ static void shell_cat_file(const char *name)
         read_size = file_read(file, buffer, sizeof(buffer));
         if (read_size < 0)
         {
-            kprintf("read failed: %s\n", name);
+            shell_print_path_error("cat", name);
             file_close(file);
             return;
         }
@@ -849,6 +1108,100 @@ static void shell_cat_file(const char *name)
     else if (last_char != '\n')
     {
         console_putc('\n');
+    }
+
+    file_close(file);
+}
+
+static void shell_print_pwd(void)
+{
+    kprintf("/\n");
+}
+
+static void shell_print_stat(const char *path)
+{
+    const vfs_file_info_t *info;
+    const char *type;
+
+    if (*path == '\0')
+    {
+        kprintf("usage: stat <path>\n");
+        return;
+    }
+
+    info = vfs_stat(path);
+    if (info == 0)
+    {
+        shell_print_path_error("stat", path);
+        return;
+    }
+
+    type = ((info->flags & VFS_FILE_FLAG_DIRECTORY) != 0U) ? "directory" : "file";
+    kprintf("path: %s\n", info->name);
+    kprintf("type: %s\n", type);
+    kprintf("size: %u bytes\n", info->size);
+    kprintf("flags: 0x%x\n", info->flags);
+}
+
+static void shell_hexdump_file(const char *path)
+{
+    const vfs_file_info_t *info;
+    file_t *file;
+    unsigned char buffer[SHELL_FILE_BUFFER_MAX];
+    unsigned long offset;
+
+    if (*path == '\0')
+    {
+        kprintf("usage: hexdump <path>\n");
+        return;
+    }
+
+    info = vfs_stat(path);
+    if (info == 0 || (info->flags & VFS_FILE_FLAG_DIRECTORY) != 0U)
+    {
+        shell_print_path_error("hexdump", path);
+        return;
+    }
+
+    file = file_open(path);
+    if (file == 0)
+    {
+        shell_print_path_error("hexdump", path);
+        return;
+    }
+
+    offset = 0UL;
+    while (offset < info->size)
+    {
+        int read_size;
+        unsigned int line_offset;
+
+        read_size = file_read(file, buffer, sizeof(buffer));
+        if (read_size < 0)
+        {
+            shell_print_path_error("hexdump", path);
+            file_close(file);
+            return;
+        }
+
+        if (read_size == 0)
+        {
+            break;
+        }
+
+        for (line_offset = 0U; line_offset < (unsigned int)read_size; line_offset += SHELL_HEXDUMP_BYTES_PER_LINE)
+        {
+            unsigned int count;
+
+            count = (unsigned int)read_size - line_offset;
+            if (count > SHELL_HEXDUMP_BYTES_PER_LINE)
+            {
+                count = SHELL_HEXDUMP_BYTES_PER_LINE;
+            }
+            shell_dump_hex_line(offset + line_offset, buffer + line_offset, count);
+        }
+
+        offset += (unsigned long)read_size;
     }
 
     file_close(file);
@@ -901,7 +1254,13 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (shell_starts_with(line, "ls"))
+    if (strcmp(line, "pwd") == 0)
+    {
+        shell_print_pwd();
+        return;
+    }
+
+    if (shell_command_matches(line, "ls"))
     {
         shell_list_files(shell_skip_spaces(line + 2));
         return;
@@ -931,7 +1290,7 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (shell_starts_with(line, "blkread"))
+    if (shell_command_matches(line, "blkread"))
     {
         shell_block_read(shell_skip_spaces(line + 7));
         return;
@@ -943,9 +1302,15 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (strcmp(line, "gpuinfo") == 0)
+    if (strcmp(line, "ginfo") == 0 || strcmp(line, "gpuinfo") == 0)
     {
         shell_print_gpuinfo();
+        return;
+    }
+
+    if (strcmp(line, "gclear") == 0)
+    {
+        shell_clear_graphics();
         return;
     }
 
@@ -955,7 +1320,7 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (shell_starts_with(line, "cursor"))
+    if (shell_command_matches(line, "cursor"))
     {
         shell_move_cursor(shell_skip_spaces(line + 6));
         return;
@@ -967,13 +1332,31 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (shell_starts_with(line, "console"))
+    if (shell_command_matches(line, "desktop"))
+    {
+        shell_run_desktop(shell_skip_spaces(line + 7));
+        return;
+    }
+
+    if (shell_command_matches(line, "gui files"))
+    {
+        shell_run_gui_files(shell_skip_spaces(line + 9));
+        return;
+    }
+
+    if (shell_command_matches(line, "gui view"))
+    {
+        shell_run_gui_view(shell_skip_spaces(line + 8));
+        return;
+    }
+
+    if (shell_command_matches(line, "console"))
     {
         shell_set_console_mode(shell_skip_spaces(line + 7));
         return;
     }
 
-    if (shell_starts_with(line, "input"))
+    if (shell_command_matches(line, "input"))
     {
         shell_set_input_mode(shell_skip_spaces(line + 5));
         return;
@@ -991,19 +1374,19 @@ static void shell_run_command(const char *line)
         return;
     }
 
-    if (shell_starts_with(line, "logcat"))
+    if (shell_command_matches(line, "logcat"))
     {
         shell_log_cat(shell_skip_spaces(line + 6));
         return;
     }
 
-    if (shell_starts_with(line, "logcreate"))
+    if (shell_command_matches(line, "logcreate"))
     {
         shell_log_create(shell_skip_spaces(line + 9));
         return;
     }
 
-    if (shell_starts_with(line, "logappend"))
+    if (shell_command_matches(line, "logappend"))
     {
         shell_log_append(shell_skip_spaces(line + 9));
         return;
@@ -1038,19 +1421,31 @@ static void shell_run_command(const char *line)
         panic("panic command");
     }
 
-    if (shell_starts_with(line, "cat"))
+    if (shell_command_matches(line, "stat"))
+    {
+        shell_print_stat(shell_skip_spaces(line + 4));
+        return;
+    }
+
+    if (shell_command_matches(line, "hexdump"))
+    {
+        shell_hexdump_file(shell_skip_spaces(line + 7));
+        return;
+    }
+
+    if (shell_command_matches(line, "cat"))
     {
         shell_cat_file(shell_skip_spaces(line + 3));
         return;
     }
 
-    if (shell_starts_with(line, "runelf"))
+    if (shell_command_matches(line, "runelf"))
     {
         shell_run_elf_file(shell_skip_spaces(line + 6));
         return;
     }
 
-    if (shell_starts_with(line, "run"))
+    if (shell_command_matches(line, "run"))
     {
         shell_run_user_file(shell_skip_spaces(line + 3));
         return;

@@ -12,8 +12,11 @@ typedef struct vfs_file_info
     unsigned int flags;
 } vfs_file_info_t;
 
+typedef int (*vfs_list_entry_fn_t)(const vfs_file_info_t *entry, void *context);
+
 int vfs_mount_root(void);
 int vfs_list(const char *path);
+int vfs_list_entries(const char *path, vfs_list_entry_fn_t callback, void *context);
 const vfs_file_info_t *vfs_stat(const char *path);
 int vfs_read_file(const char *path, void *buffer, unsigned long max_size);
 int vfs_read_file_part(const char *path, unsigned int offset, void *buffer, unsigned int size);

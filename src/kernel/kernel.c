@@ -23,8 +23,12 @@
 #include "kernel/test.h"
 #include "kernel/task.h"
 #include "kernel/timer.h"
+#include "lib/string.h"
 #include "platform/platform.h"
 #include "mm/pmm.h"
+
+#define KERNEL_DEFAULT_HOSTNAME "duck-os"
+#define KERNEL_BOOT_CONFIG_MAX 128U
 
 static void print_hex32(unsigned long value)
 {
@@ -45,6 +49,78 @@ static void print_hex32(unsigned long value)
         {
             console_putc((char)('a' + (digit - 10)));
         }
+    }
+}
+
+static unsigned int kernel_trim_text(char *text)
+{
+    unsigned int length;
+
+    length = (unsigned int)strlen(text);
+    while (length > 0U)
+    {
+        char ch;
+
+        ch = text[length - 1U];
+        if (ch != '\n' && ch != '\r' && ch != ' ' && ch != '\t')
+        {
+            break;
+        }
+
+        text[length - 1U] = '\0';
+        length--;
+    }
+
+    return length;
+}
+
+static int kernel_read_boot_text(const char *path, char *buffer, unsigned int buffer_size)
+{
+    int read_size;
+
+    if (path == 0 || buffer == 0 || buffer_size < 2U)
+    {
+        return -1;
+    }
+
+    read_size = vfs_read_file(path, buffer, buffer_size - 1U);
+    if (read_size <= 0)
+    {
+        return -1;
+    }
+
+    buffer[read_size] = '\0';
+    return (int)kernel_trim_text(buffer);
+}
+
+static void kernel_print_boot_config(void)
+{
+    char hostname[KERNEL_BOOT_CONFIG_MAX];
+    char motd[KERNEL_BOOT_CONFIG_MAX];
+    char theme[KERNEL_BOOT_CONFIG_MAX];
+    int hostname_length;
+    int motd_length;
+    int theme_length;
+
+    strlcpy(hostname, KERNEL_DEFAULT_HOSTNAME, sizeof(hostname));
+    hostname_length = kernel_read_boot_text("/etc/hostname", hostname, sizeof(hostname));
+    if (hostname_length < 0 || hostname[0] == '\0')
+    {
+        strlcpy(hostname, KERNEL_DEFAULT_HOSTNAME, sizeof(hostname));
+    }
+
+    kprintf("hostname: %s\n", hostname);
+
+    motd_length = kernel_read_boot_text("/etc/motd", motd, sizeof(motd));
+    if (motd_length >= 0 && motd[0] != '\0')
+    {
+        kprintf("motd: %s\n", motd);
+    }
+
+    theme_length = kernel_read_boot_text("/etc/theme", theme, sizeof(theme));
+    if (theme_length >= 0 && theme[0] != '\0')
+    {
+        kprintf("[INFO] theme: %s\n", theme);
     }
 }
 
@@ -186,6 +262,7 @@ void kernel_main(void)
     {
         panic("vfs root mount failed");
     }
+    kernel_print_boot_config();
     kernel_mount_logfs();
     initramfs_init();
     task_init();
