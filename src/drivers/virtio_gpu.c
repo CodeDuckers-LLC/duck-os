@@ -1,7 +1,8 @@
 #include "arch/aarch64/mmu.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_gpu.h"
-#include "graphics/framebuffer.h"
+#include "gfx/draw.h"
+#include "gfx/font.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "lib/string.h"
@@ -23,6 +24,8 @@
 #define VIRTIO_GPU_RESOURCE_ID 1U
 #define VIRTIO_GPU_SCANOUT_ID 0U
 #define VIRTIO_GPU_MAX_SCANOUTS 16U
+#define VIRTIO_GPU_TEST_WIDTH 640U
+#define VIRTIO_GPU_TEST_HEIGHT 480U
 
 struct virtio_gpu_ctrl_hdr
 {
@@ -113,14 +116,51 @@ struct virtio_gpu_state
     struct virtio_mmio_device *device;
     struct virtqueue controlq;
     framebuffer_t framebuffer;
-    void *framebuffer_memory;
     unsigned int framebuffer_size;
     unsigned int width;
     unsigned int height;
-    unsigned int stride;
 };
 
 static struct virtio_gpu_state virtio_gpu_state;
+
+static void virtio_gpu_draw_demo(framebuffer_t *fb)
+{
+    unsigned int viewport_width;
+    unsigned int viewport_height;
+    unsigned int viewport_x;
+    unsigned int viewport_y;
+
+    if (fb == 0 || fb->width == 0U || fb->height == 0U)
+    {
+        return;
+    }
+
+    viewport_width = fb->width;
+    if (viewport_width > VIRTIO_GPU_TEST_WIDTH)
+    {
+        viewport_width = VIRTIO_GPU_TEST_WIDTH;
+    }
+
+    viewport_height = fb->height;
+    if (viewport_height > VIRTIO_GPU_TEST_HEIGHT)
+    {
+        viewport_height = VIRTIO_GPU_TEST_HEIGHT;
+    }
+
+    viewport_x = (fb->width - viewport_width) / 2U;
+    viewport_y = (fb->height - viewport_height) / 2U;
+    draw_rect(fb, (int)viewport_x, (int)viewport_y, (int)viewport_width, (int)viewport_height, 0xff7fd1ffU);
+    draw_fill_rect(fb, (int)(viewport_x + 64U), (int)(viewport_y + 64U), 192, 96, 0xfff2b134U);
+    draw_fill_rect(fb, (int)(viewport_x + 320U), (int)(viewport_y + 96U), 192, 128, 0xff2dce89U);
+    draw_fill_rect(fb, (int)(viewport_x + 176U), (int)(viewport_y + 248U), 288, 128, 0xffd94f70U);
+    draw_rect(fb, (int)(viewport_x + 64U), (int)(viewport_y + 64U), 192, 96, 0xffffffffU);
+    draw_rect(fb, (int)(viewport_x + 320U), (int)(viewport_y + 96U), 192, 128, 0xffffffffU);
+    draw_rect(fb, (int)(viewport_x + 176U), (int)(viewport_y + 248U), 288, 128, 0xffffffffU);
+
+    gfx_draw_string(fb, (int)(viewport_x + 96U), (int)(viewport_y + 96U), "duck-os", 0xffffffffU, 0xfff2b134U);
+    gfx_draw_string(fb, (int)(viewport_x + 352U), (int)(viewport_y + 144U), "virtio-gpu", 0xffffffffU, 0xff2dce89U);
+    gfx_draw_string(fb, (int)(viewport_x + 208U), (int)(viewport_y + 296U), "640x480", 0xffffffffU, 0xffd94f70U);
+}
 
 static void virtio_gpu_init_header(struct virtio_gpu_ctrl_hdr *hdr, unsigned int type)
 {
@@ -233,7 +273,7 @@ static int virtio_gpu_attach_backing(void)
     virtio_gpu_init_header(&request.attach.hdr, VIRTIO_GPU_CMD_RESOURCE_ATTACH_BACKING);
     request.attach.resource_id = VIRTIO_GPU_RESOURCE_ID;
     request.attach.nr_entries = 1U;
-    request.entry.addr = (unsigned long)virtio_gpu_state.framebuffer_memory;
+    request.entry.addr = (unsigned long)virtio_gpu_state.framebuffer.buffer;
     request.entry.length = virtio_gpu_state.framebuffer_size;
     return virtio_gpu_simple_request(&request, sizeof(request), VIRTIO_GPU_RESP_OK_NODATA);
 }
@@ -261,7 +301,7 @@ int virtio_gpu_flush(void)
         return -1;
     }
 
-    mmu_sync_for_device(virtio_gpu_state.framebuffer_memory, virtio_gpu_state.framebuffer_size);
+    mmu_sync_for_device(virtio_gpu_state.framebuffer.buffer, virtio_gpu_state.framebuffer_size);
 
     memset(&transfer, 0, sizeof(transfer));
     virtio_gpu_init_header(&transfer.hdr, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
@@ -288,7 +328,7 @@ int virtio_gpu_redraw_demo(void)
         return -1;
     }
 
-    framebuffer_draw_demo(&virtio_gpu_state.framebuffer);
+    virtio_gpu_draw_demo(&virtio_gpu_state.framebuffer);
     return virtio_gpu_flush();
 }
 
@@ -352,36 +392,55 @@ void virtio_gpu_init(void)
         return;
     }
 
-    virtio_gpu_state.stride = virtio_gpu_state.width * 4U;
-    virtio_gpu_state.framebuffer_size = virtio_gpu_state.stride * virtio_gpu_state.height;
-    virtio_gpu_state.framebuffer_memory = kzalloc(virtio_gpu_state.framebuffer_size);
-    if (virtio_gpu_state.framebuffer_memory == 0)
+    virtio_gpu_state.framebuffer.width = virtio_gpu_state.width;
+    virtio_gpu_state.framebuffer.height = virtio_gpu_state.height;
+    virtio_gpu_state.framebuffer.pitch = virtio_gpu_state.width * 4U;
+    virtio_gpu_state.framebuffer.bytes_per_pixel = 4U;
+    virtio_gpu_state.framebuffer.pixel_format = FB_PIXEL_FORMAT_B8G8R8A8;
+    virtio_gpu_state.framebuffer_size = virtio_gpu_state.framebuffer.pitch * virtio_gpu_state.height;
+    virtio_gpu_state.framebuffer.buffer = (unsigned char *)kzalloc(virtio_gpu_state.framebuffer_size);
+    if (virtio_gpu_state.framebuffer.buffer == 0)
     {
         kprintf("[ERROR] virtio-gpu: framebuffer allocation failed\n");
         virtio_gpu_state.device = 0;
         return;
     }
 
-    framebuffer_init(&virtio_gpu_state.framebuffer,
-                     virtio_gpu_state.width,
-                     virtio_gpu_state.height,
-                     virtio_gpu_state.stride,
-                     4U,
-                     virtio_gpu_state.framebuffer_memory);
-
-    if (virtio_gpu_create_resource() != 0 ||
-        virtio_gpu_attach_backing() != 0 ||
-        virtio_gpu_set_scanout() != 0 ||
-        virtio_gpu_redraw_demo() != 0)
+    if (virtio_gpu_create_resource() != 0)
     {
-        kprintf("[ERROR] virtio-gpu: scanout setup failed\n");
+        kprintf("[ERROR] virtio-gpu: create resource failed\n");
         virtio_gpu_state.device = 0;
         return;
     }
 
-    kprintf("[INFO] virtio-gpu: ready %ux%u on slot %u irq %u\n",
+    if (virtio_gpu_attach_backing() != 0)
+    {
+        kprintf("[ERROR] virtio-gpu: attach backing failed\n");
+        virtio_gpu_state.device = 0;
+        return;
+    }
+
+    if (virtio_gpu_set_scanout() != 0)
+    {
+        kprintf("[ERROR] virtio-gpu: set scanout failed\n");
+        virtio_gpu_state.device = 0;
+        return;
+    }
+
+    virtio_gpu_draw_demo(&virtio_gpu_state.framebuffer);
+
+    if (virtio_gpu_flush() != 0)
+    {
+        kprintf("[ERROR] virtio-gpu: flush failed\n");
+        virtio_gpu_state.device = 0;
+        return;
+    }
+
+    kprintf("[INFO] virtio-gpu: ready %ux%u scanout=%ux%u on slot %u irq %u\n",
             virtio_gpu_state.width,
             virtio_gpu_state.height,
+            display_info.pmodes[0].rect.width,
+            display_info.pmodes[0].rect.height,
             device->slot,
             device->irq);
 }

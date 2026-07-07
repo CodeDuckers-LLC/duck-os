@@ -5,6 +5,10 @@
 #define QEMU_VIRT_VIRTIO_MMIO_STRIDE 0x00000200UL
 #define QEMU_VIRT_VIRTIO_MMIO_COUNT 32U
 #define QEMU_VIRT_VIRTIO_MMIO_IRQ_BASE 48U
+#define QEMU_VIRT_PCI_ECAM_BASE 0x4010000000UL
+#define QEMU_VIRT_PCI_ECAM_SIZE 0x10000000UL
+#define QEMU_VIRT_PCI_BUS_START 0U
+#define QEMU_VIRT_PCI_BUS_END 255U
 #define QEMU_VIRT_RAM_BASE 0x40000000UL
 #define QEMU_VIRT_RAM_SIZE (128UL * 1024UL * 1024UL)
 
@@ -46,4 +50,24 @@ unsigned int platform_get_virtio_mmio_count(void)
 unsigned int platform_get_virtio_mmio_irq(unsigned int slot)
 {
     return QEMU_VIRT_VIRTIO_MMIO_IRQ_BASE + slot;
+}
+
+unsigned long platform_get_pci_ecam_base(void)
+{
+    return QEMU_VIRT_PCI_ECAM_BASE;
+}
+
+unsigned long platform_get_pci_ecam_size(void)
+{
+    return QEMU_VIRT_PCI_ECAM_SIZE;
+}
+
+unsigned int platform_get_pci_bus_start(void)
+{
+    return QEMU_VIRT_PCI_BUS_START;
+}
+
+unsigned int platform_get_pci_bus_end(void)
+{
+    return QEMU_VIRT_PCI_BUS_END;
 }

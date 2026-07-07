@@ -21,15 +21,20 @@ OBJS := \
 	$(BUILD_DIR)/arch/aarch64/mmu.o \
 	$(BUILD_DIR)/drivers/virtqueue.o \
 	$(BUILD_DIR)/drivers/ramdisk.o \
+	$(BUILD_DIR)/drivers/pci.o \
 	$(BUILD_DIR)/drivers/virtio_blk.o \
 	$(BUILD_DIR)/drivers/virtio_gpu.o \
+	$(BUILD_DIR)/drivers/virtio_input.o \
 	$(BUILD_DIR)/drivers/virtio_mmio.o \
 	$(BUILD_DIR)/drivers/virtio_rng.o \
 	$(BUILD_DIR)/fs/file.o \
 	$(BUILD_DIR)/fs/logfs.o \
 	$(BUILD_DIR)/fs/tinyfs.o \
 	$(BUILD_DIR)/fs/vfs.o \
-	$(BUILD_DIR)/graphics/framebuffer.o \
+	$(BUILD_DIR)/gfx/draw.o \
+	$(BUILD_DIR)/gfx/font8x8.o \
+	$(BUILD_DIR)/gfx/framebuffer.o \
+	$(BUILD_DIR)/gfx/text.o \
 	$(BUILD_DIR)/arch/aarch64/user_enter.o \
 	$(BUILD_DIR)/drivers/uart_pl011.o \
 	$(BUILD_DIR)/platform/qemu_virt/platform.o \
@@ -38,6 +43,7 @@ OBJS := \
 	$(BUILD_DIR)/kernel/klog.o \
 	$(BUILD_DIR)/kernel/kmalloc.o \
 	$(BUILD_DIR)/kernel/initramfs.o \
+	$(BUILD_DIR)/kernel/input.o \
 	$(BUILD_DIR)/kernel/memory_layout.o \
 	$(BUILD_DIR)/kernel/panic.o \
 	$(BUILD_DIR)/kernel/shell.o \
@@ -105,11 +111,19 @@ $(BUILD_DIR)/drivers/ramdisk.o: src/drivers/ramdisk.c include/block/block_device
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/drivers/pci.o: src/drivers/pci.c include/drivers/pci.h include/kernel/klog.h include/platform/platform.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/drivers/virtio_blk.o: src/drivers/virtio_blk.c include/arch/aarch64/mmu.h include/block/block_device.h include/drivers/virtio.h include/drivers/virtio_blk.h include/kernel/klog.h include/kernel/spinlock.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/drivers/virtio_gpu.o: src/drivers/virtio_gpu.c include/arch/aarch64/mmu.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtqueue.h include/graphics/framebuffer.h include/kernel/kmalloc.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/drivers/virtio_gpu.o: src/drivers/virtio_gpu.c include/arch/aarch64/mmu.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtqueue.h include/gfx/framebuffer.h include/kernel/kmalloc.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/drivers/virtio_input.o: src/drivers/virtio_input.c include/arch/aarch64/mmu.h include/drivers/virtio.h include/drivers/virtio_input.h include/drivers/virtqueue.h include/kernel/input.h include/kernel/klog.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -137,7 +151,19 @@ $(BUILD_DIR)/fs/vfs.o: src/fs/vfs.c include/block/block_device.h include/fs/tiny
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/graphics/framebuffer.o: src/graphics/framebuffer.c include/graphics/framebuffer.h | $(BUILD_DIR)
+$(BUILD_DIR)/gfx/framebuffer.o: src/gfx/framebuffer.c include/gfx/framebuffer.h include/kernel/kmalloc.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gfx/draw.o: src/gfx/draw.c include/gfx/draw.h include/gfx/framebuffer.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gfx/font8x8.o: src/gfx/font8x8.c include/gfx/font.h include/gfx/framebuffer.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gfx/text.o: src/gfx/text.c include/gfx/draw.h include/gfx/font.h include/gfx/framebuffer.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -153,11 +179,11 @@ $(BUILD_DIR)/platform/qemu_virt/platform.o: src/platform/qemu_virt/platform.c in
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/console.o: src/kernel/console.c include/drivers/uart.h include/kernel/console.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/console.o: src/kernel/console.c include/drivers/uart.h include/gfx/draw.h include/gfx/font.h include/gfx/framebuffer.h include/kernel/console.h include/kernel/input.h include/kernel/kmalloc.h include/kernel/spinlock.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/drivers/ramdisk.h include/drivers/virtio.h include/drivers/virtio_blk.h include/drivers/virtio_rng.h include/fs/tinyfs.h include/fs/vfs.h include/kernel/console.h include/kernel/klog.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/kernel.o: src/kernel/kernel.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/drivers/pci.h include/drivers/ramdisk.h include/drivers/virtio.h include/drivers/virtio_blk.h include/drivers/virtio_gpu.h include/drivers/virtio_input.h include/drivers/virtio_rng.h include/fs/tinyfs.h include/fs/vfs.h include/kernel/console.h include/kernel/initramfs.h include/kernel/input.h include/kernel/klog.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -166,6 +192,10 @@ $(BUILD_DIR)/kernel/klog.o: src/kernel/klog.c include/kernel/console.h include/k
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel/initramfs.o: src/kernel/initramfs.c include/kernel/initramfs.h include/kernel/klog.h include/kernel/panic.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel/input.o: src/kernel/input.c include/drivers/uart.h include/drivers/virtio_input.h include/kernel/input.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -181,7 +211,7 @@ $(BUILD_DIR)/kernel/panic.o: src/kernel/panic.c include/arch/aarch64/cpu.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/drivers/virtio.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/kernel/console.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -197,7 +227,7 @@ $(BUILD_DIR)/kernel/task.o: src/kernel/task.c include/arch/aarch64/sysreg.h incl
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/block/block_device.h include/drivers/ramdisk.h include/drivers/virtio.h include/drivers/virtio_blk.h include/drivers/virtio_rng.h include/fs/file.h include/fs/tinyfs.h include/fs/vfs.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/test.o: src/kernel/test.c include/arch/aarch64/cpu.h include/arch/aarch64/exceptions.h include/arch/aarch64/gic.h include/arch/aarch64/mmu.h include/arch/aarch64/sysreg.h include/block/block_device.h include/drivers/pci.h include/drivers/ramdisk.h include/drivers/virtio.h include/drivers/virtio_blk.h include/drivers/virtio_gpu.h include/drivers/virtio_input.h include/drivers/virtio_rng.h include/fs/file.h include/fs/tinyfs.h include/fs/vfs.h include/gfx/draw.h include/gfx/font.h include/gfx/framebuffer.h include/kernel/console.h include/kernel/initramfs.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/task.h include/kernel/test.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h include/platform/platform.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 

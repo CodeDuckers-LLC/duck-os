@@ -5,14 +5,21 @@
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 #include "drivers/ramdisk.h"
+#include "drivers/pci.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_blk.h"
 #include "drivers/virtio_gpu.h"
+#include "drivers/virtio_input.h"
 #include "drivers/virtio_rng.h"
 #include "fs/file.h"
 #include "fs/logfs.h"
 #include "fs/tinyfs.h"
 #include "fs/vfs.h"
+#include "gfx/draw.h"
+#include "gfx/font.h"
+#include "gfx/framebuffer.h"
+#include "kernel/console.h"
+#include "kernel/input.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/initramfs.h"
@@ -125,6 +132,14 @@ static void test_platform_virtio_layout(void)
     test_assert(platform_get_virtio_mmio_stride() == 0x200UL, "virtio mmio stride");
     test_assert(platform_get_virtio_mmio_count() == 32U, "virtio mmio count");
     test_assert(platform_get_virtio_mmio_irq(0) == 48U, "virtio mmio irq0");
+}
+
+static void test_platform_pci_layout(void)
+{
+    test_assert(platform_get_pci_ecam_base() == 0x4010000000UL, "pci ecam base");
+    test_assert(platform_get_pci_ecam_size() == 0x10000000UL, "pci ecam size");
+    test_assert(platform_get_pci_bus_start() == 0U, "pci bus start");
+    test_assert(platform_get_pci_bus_end() == 255U, "pci bus end");
 }
 
 static void test_string_functions(void)
@@ -432,6 +447,11 @@ static void test_virtio(void)
     test_assert(virtio_blk_available(), "virtio blk ready");
 }
 
+static void test_pci(void)
+{
+    test_assert(pci_available(), "pci ecam available");
+}
+
 static void test_virtio_gpu(void)
 {
     if (!virtio_gpu_available())
@@ -440,10 +460,203 @@ static void test_virtio_gpu(void)
         return;
     }
 
-    test_assert(virtio_gpu_width() > 0U, "virtio gpu width");
-    test_assert(virtio_gpu_height() > 0U, "virtio gpu height");
+    test_assert(virtio_gpu_width() >= 640U, "virtio gpu width");
+    test_assert(virtio_gpu_height() >= 480U, "virtio gpu height");
     test_assert(virtio_gpu_framebuffer() != 0, "virtio gpu framebuffer");
     test_assert(virtio_gpu_redraw_demo() == 0, "virtio gpu redraw");
+}
+
+static void test_framebuffer_draw(void)
+{
+    framebuffer_t *fb;
+    unsigned int background;
+    unsigned int pixel_color;
+    unsigned int line_color;
+    unsigned int rect_color;
+    unsigned int fill_color;
+    unsigned int hline_color;
+    unsigned int vline_color;
+
+    fb = fb_create_test(8U, 8U);
+    test_assert(fb != 0, "framebuffer test alloc");
+
+    background = 0x00000000U;
+    pixel_color = 0x00112233U;
+    line_color = 0x00445566U;
+    rect_color = 0x00778899U;
+    fill_color = 0x00aabbccU;
+    hline_color = 0x00cc8844U;
+    vline_color = 0x00ee3355U;
+
+    fb_clear(fb, background);
+
+    draw_pixel(fb, 2, 3, pixel_color);
+    draw_pixel(fb, -1, 3, 0xffffffffU);
+    draw_pixel(fb, 8, 8, 0xffffffffU);
+    test_assert(fb_get_pixel(fb, 2U, 3U) == pixel_color, "draw pixel");
+    test_assert(fb_get_pixel(fb, 0U, 3U) == background, "draw pixel clip");
+
+    draw_line(fb, -2, -2, 4, 4, line_color);
+    test_assert(fb_get_pixel(fb, 0U, 0U) == line_color, "draw line clipped start");
+    test_assert(fb_get_pixel(fb, 4U, 4U) == line_color, "draw line endpoint");
+    test_assert(fb_get_pixel(fb, 5U, 4U) == background, "draw line no spill");
+
+    draw_rect(fb, -1, 1, 4, 3, rect_color);
+    test_assert(fb_get_pixel(fb, 0U, 1U) == rect_color, "draw rect top");
+    test_assert(fb_get_pixel(fb, 2U, 3U) == rect_color, "draw rect bottom");
+    test_assert(fb_get_pixel(fb, 1U, 2U) == background, "draw rect hollow");
+
+    draw_fill_rect(fb, 5, 5, 4, 4, fill_color);
+    test_assert(fb_get_pixel(fb, 5U, 5U) == fill_color, "draw fill rect start");
+    test_assert(fb_get_pixel(fb, 7U, 7U) == fill_color, "draw fill rect clip");
+    test_assert(fb_get_pixel(fb, 4U, 5U) == background, "draw fill rect bounds");
+
+    draw_hline(fb, -2, 6, 5, hline_color);
+    test_assert(fb_get_pixel(fb, 0U, 6U) == hline_color, "draw hline clip");
+    test_assert(fb_get_pixel(fb, 2U, 6U) == hline_color, "draw hline body");
+    test_assert(fb_get_pixel(fb, 3U, 6U) == background, "draw hline end");
+
+    draw_vline(fb, 6, -2, 5, vline_color);
+    test_assert(fb_get_pixel(fb, 6U, 0U) == vline_color, "draw vline clip");
+    test_assert(fb_get_pixel(fb, 6U, 2U) == vline_color, "draw vline body");
+    test_assert(fb_get_pixel(fb, 6U, 3U) == background, "draw vline end");
+}
+
+static void test_framebuffer_text(void)
+{
+    framebuffer_t *fb;
+    unsigned int bg_color;
+    unsigned int fg_color;
+    unsigned int alt_fg_color;
+
+    fb = fb_create_test(24U, 16U);
+    test_assert(fb != 0, "framebuffer text alloc");
+
+    bg_color = 0x00101010U;
+    fg_color = 0x00f0f0f0U;
+    alt_fg_color = 0x0000ff00U;
+
+    fb_clear(fb, 0U);
+
+    gfx_draw_char(fb, 1, 1, 'A', fg_color, bg_color);
+    test_assert(fb_get_pixel(fb, 3U, 1U) == fg_color, "draw char fg");
+    test_assert(fb_get_pixel(fb, 1U, 1U) == bg_color, "draw char bg");
+    test_assert(fb_get_pixel(fb, 2U, 3U) == fg_color, "draw char body");
+    test_assert(fb_get_pixel(fb, 1U, 8U) == bg_color, "draw char bottom row");
+
+    gfx_draw_char(fb, -2, 0, '!', alt_fg_color, bg_color);
+    test_assert(fb_get_pixel(fb, 1U, 0U) == alt_fg_color, "draw char clip fg");
+    test_assert(fb_get_pixel(fb, 0U, 5U) == bg_color, "draw char clip bg");
+
+    fb_clear(fb, bg_color);
+    gfx_draw_string(fb, 0, 0, "A\nB", fg_color, bg_color);
+    test_assert(fb_get_pixel(fb, 2U, 0U) == fg_color, "draw string first line");
+    test_assert(fb_get_pixel(fb, 1U, 8U) == fg_color, "draw string newline");
+
+    gfx_draw_char(fb, 8, 0, 31, alt_fg_color, bg_color);
+    test_assert(fb_get_pixel(fb, 10U, 0U) == alt_fg_color, "draw char fallback");
+}
+
+static void test_graphics_console(void)
+{
+    framebuffer_t *fb;
+    framebuffer_t *saved_fb;
+    unsigned int saved_mode;
+    int ok_attach;
+    int ok_sink_graphics;
+    int ok_putc;
+    int ok_newline;
+    int ok_backspace;
+    int ok_scroll;
+    int ok_cursor;
+
+    fb = fb_create_test(64U, 24U);
+    test_assert(fb != 0, "graphics console alloc");
+
+    saved_fb = console_graphics_framebuffer();
+    saved_mode = console_output_mode();
+
+    console_attach_graphics(fb);
+    console_set_output_mode(CONSOLE_SINK_GRAPHICS);
+
+    ok_attach = console_graphics_framebuffer() == fb;
+    ok_sink_graphics = console_output_mode() == CONSOLE_SINK_GRAPHICS;
+
+    console_write("A");
+    ok_putc = fb_get_pixel(fb, 2U, 0U) == 0xffffffffU;
+    ok_cursor = fb_get_pixel(fb, 8U, 6U) == 0xff7fd1ffU;
+
+    console_write("\nB");
+    ok_newline = fb_get_pixel(fb, 1U, 8U) == 0xffffffffU;
+
+    console_write("\b");
+    ok_backspace = fb_get_pixel(fb, 1U, 8U) == 0xff000000U;
+
+    console_write("1\n2\n3\n");
+    ok_scroll = fb_get_pixel(fb, 1U, 0U) == 0xffffffffU &&
+                fb_get_pixel(fb, 9U, 0U) == 0xff000000U &&
+                fb_get_pixel(fb, 1U, 8U) == 0xffffffffU &&
+                fb_get_pixel(fb, 1U, 16U) == 0xff000000U;
+
+    console_attach_graphics(saved_fb);
+    console_set_output_mode(saved_mode);
+
+    test_assert(ok_attach, "graphics console attach");
+    test_assert(ok_sink_graphics, "graphics console mode");
+    test_assert(ok_putc, "graphics console putc");
+    test_assert(ok_newline, "graphics console newline");
+    test_assert(ok_backspace, "graphics console backspace");
+    test_assert(ok_scroll, "graphics console scroll");
+    test_assert(ok_cursor, "graphics console cursor");
+}
+
+static void test_input_layer(void)
+{
+    unsigned int saved_mode;
+    char ch;
+
+    saved_mode = input_mode();
+    input_set_mode(INPUT_SOURCE_SERIAL | INPUT_SOURCE_KEYBOARD);
+
+    input_queue_serial_char('s');
+    ch = input_getc();
+    test_assert(ch == 's', "input serial char");
+
+    input_queue_key_event(INPUT_KEY_A, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == 'a', "input key alpha");
+
+    input_queue_key_event(INPUT_KEY_LEFTSHIFT, INPUT_KEY_PRESS);
+    input_queue_key_event(INPUT_KEY_A, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == 'A', "input key shift alpha");
+    input_queue_key_event(INPUT_KEY_LEFTSHIFT, INPUT_KEY_RELEASE);
+
+    input_queue_key_event(INPUT_KEY_1, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == '1', "input key digit");
+
+    input_queue_key_event(INPUT_KEY_LEFTSHIFT, INPUT_KEY_PRESS);
+    input_queue_key_event(INPUT_KEY_1, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == '!', "input key shift digit");
+    input_queue_key_event(INPUT_KEY_LEFTSHIFT, INPUT_KEY_RELEASE);
+
+    input_queue_key_event(INPUT_KEY_ENTER, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == '\n', "input key enter");
+
+    input_queue_key_event(INPUT_KEY_BACKSPACE, INPUT_KEY_PRESS);
+    ch = input_getc();
+    test_assert(ch == '\b', "input key backspace");
+
+    input_set_mode(INPUT_SOURCE_SERIAL);
+    input_queue_key_event(INPUT_KEY_A, INPUT_KEY_PRESS);
+    input_queue_serial_char('z');
+    ch = input_getc();
+    test_assert(ch == 'z', "input mode serial");
+
+    input_set_mode(saved_mode);
 }
 
 static void test_virtio_blk(void)
@@ -683,6 +896,7 @@ void test_run_all(void)
     test_mmu();
     test_memory_layout();
     test_platform_virtio_layout();
+    test_platform_pci_layout();
     test_string_functions();
     test_kmalloc();
     test_pmm();
@@ -692,8 +906,13 @@ void test_run_all(void)
     test_initramfs();
     test_tasks();
     test_timer();
+    test_pci();
     test_virtio();
     test_virtio_gpu();
+    test_framebuffer_draw();
+    test_framebuffer_text();
+    test_graphics_console();
+    test_input_layer();
     test_virtio_blk();
     test_ramdisk();
     test_tinyfs();

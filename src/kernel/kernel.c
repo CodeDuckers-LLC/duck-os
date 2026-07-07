@@ -5,8 +5,10 @@
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/cpu.h"
 #include "drivers/ramdisk.h"
+#include "drivers/pci.h"
 #include "drivers/virtio_blk.h"
 #include "drivers/virtio_gpu.h"
+#include "drivers/virtio_input.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_rng.h"
 #include "fs/logfs.h"
@@ -14,6 +16,7 @@
 #include "fs/vfs.h"
 #include "kernel/console.h"
 #include "kernel/initramfs.h"
+#include "kernel/input.h"
 #include "kernel/klog.h"
 #include "kernel/panic.h"
 #include "kernel/shell.h"
@@ -135,6 +138,7 @@ void kernel_main(void)
     block_device_t *ramdisk;
 
     console_init();
+    input_init();
     sysreg_set_daif_irq();
     ram_start = platform_get_ram_base();
     ram_end = ram_start + platform_get_ram_size();
@@ -153,11 +157,22 @@ void kernel_main(void)
     timer_init();
     mmu_init();
     pmm_init();
+    pci_init();
     virtio_init();
     virtio_rng_init();
     ramdisk_init();
     virtio_blk_init();
     virtio_gpu_init();
+    virtio_input_init();
+    if (virtio_gpu_available())
+    {
+        console_attach_graphics((framebuffer_t *)virtio_gpu_framebuffer());
+        console_set_output_mode(CONSOLE_SINK_SERIAL | CONSOLE_SINK_GRAPHICS);
+    }
+    if (virtio_input_available())
+    {
+        console_set_input_mode(INPUT_SOURCE_SERIAL | INPUT_SOURCE_KEYBOARD);
+    }
     ramdisk = ramdisk_device();
     if (ramdisk == 0)
     {

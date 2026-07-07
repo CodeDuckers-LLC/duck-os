@@ -41,6 +41,7 @@
 static unsigned long mmu_l1_table[MMU_TABLE_ENTRIES] __attribute__((aligned(4096)));
 static unsigned long mmu_l2_low_table[MMU_TABLE_ENTRIES] __attribute__((aligned(4096)));
 static unsigned long mmu_l2_ram_table[MMU_TABLE_ENTRIES] __attribute__((aligned(4096)));
+static unsigned long mmu_l2_pci_table[MMU_TABLE_ENTRIES] __attribute__((aligned(4096)));
 static unsigned long mmu_l3_user_table[MMU_TABLE_ENTRIES] __attribute__((aligned(4096)));
 static int mmu_initialized;
 
@@ -140,15 +141,24 @@ static void mmu_build_tables(void)
     unsigned long address;
     unsigned long ram_start;
     unsigned long ram_end;
+    unsigned long pci_ecam_base;
+    unsigned long pci_ecam_end;
 
     memset(mmu_l1_table, 0, sizeof(mmu_l1_table));
     memset(mmu_l2_low_table, 0, sizeof(mmu_l2_low_table));
     memset(mmu_l2_ram_table, 0, sizeof(mmu_l2_ram_table));
+    memset(mmu_l2_pci_table, 0, sizeof(mmu_l2_pci_table));
     memset(mmu_l3_user_table, 0, sizeof(mmu_l3_user_table));
 
     mmu_map_l1_table(0x00000000UL, mmu_l2_low_table);
     mmu_map_l1_table(platform_get_ram_base(), mmu_l2_ram_table);
     mmu_map_l2_table(mmu_l2_low_table, 0x00000000UL, mmu_l3_user_table);
+
+    pci_ecam_base = platform_get_pci_ecam_base();
+    if (pci_ecam_base != 0UL && platform_get_pci_ecam_size() != 0UL)
+    {
+        mmu_map_l1_table(pci_ecam_base, mmu_l2_pci_table);
+    }
 
     mmu_map_l2_block(mmu_l2_low_table,
                      GICD_BASE,
@@ -168,6 +178,14 @@ static void mmu_build_tables(void)
         mmu_map_l2_block(mmu_l2_ram_table,
                          address,
                          MMU_DESC_AF | MMU_DESC_SH_INNER | MMU_DESC_ATTR_NORMAL);
+    }
+
+    pci_ecam_end = pci_ecam_base + platform_get_pci_ecam_size();
+    for (address = pci_ecam_base; address < pci_ecam_end; address += MMU_L2_BLOCK_SIZE)
+    {
+        mmu_map_l2_block(mmu_l2_pci_table,
+                         address,
+                         MMU_DESC_AF | MMU_DESC_ATTR_DEVICE | MMU_DESC_PXN | MMU_DESC_UXN);
     }
 }
 

@@ -1,7 +1,7 @@
 #ifndef DRIVERS_VIRTIO_GPU_H
 #define DRIVERS_VIRTIO_GPU_H
 
-#include "graphics/framebuffer.h"
+#include "gfx/framebuffer.h"
 
 void virtio_gpu_init(void);
 int virtio_gpu_available(void);

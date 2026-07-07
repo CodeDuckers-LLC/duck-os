@@ -34,8 +34,8 @@ Current implementation chooses **Option B: VirtIO GPU**, using the simple 2D pat
 
 ## Current Files
 
-- [include/graphics/framebuffer.h](/E:/Programming/Github/duck-os/include/graphics/framebuffer.h:1)
-- [src/graphics/framebuffer.c](/E:/Programming/Github/duck-os/src/graphics/framebuffer.c:1)
+- [include/gfx/framebuffer.h](../include/gfx/framebuffer.h)
+- [src/gfx/framebuffer.c](../src/gfx/framebuffer.c)
 - [include/drivers/virtio_gpu.h](/E:/Programming/Github/duck-os/include/drivers/virtio_gpu.h:1)
 - [src/drivers/virtio_gpu.c](/E:/Programming/Github/duck-os/src/drivers/virtio_gpu.c:1)
 
@@ -43,8 +43,8 @@ Current implementation chooses **Option B: VirtIO GPU**, using the simple 2D pat
 
 `framebuffer`:
 
-- owns width, height, stride, pixel size, and memory pointer
-- exposes clear, fill-rect, checkerboard, gradient, and demo rendering helpers
+- owns width, height, pitch, pixel size, pixel format, and memory pointer
+- exposes test allocation plus clear, put-pixel, and get-pixel helpers
 
 `virtio_gpu`:
 

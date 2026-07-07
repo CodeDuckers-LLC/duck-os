@@ -1,10 +1,13 @@
+#include "drivers/pci.h"
 #include "block/block_device.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_gpu.h"
 #include "fs/file.h"
 #include "fs/logfs.h"
 #include "fs/vfs.h"
+#include "gfx/framebuffer.h"
 #include "kernel/console.h"
+#include "kernel/input.h"
 #include "kernel/klog.h"
 #include "kernel/kmalloc.h"
 #include "kernel/memory_layout.h"
@@ -25,6 +28,9 @@ static const char *shell_read_token(const char *text, char *buffer, unsigned lon
 static int shell_parse_unsigned_long(const char *text, unsigned long *value_out);
 static void shell_dump_hex_line(unsigned long offset, const unsigned char *buffer, unsigned int count);
 static const char *shell_skip_spaces(const char *text);
+static void shell_run_gfx_test(void);
+static void shell_set_console_mode(const char *mode);
+static void shell_set_input_mode(const char *mode);
 
 static void shell_print_help(void)
 {
@@ -42,11 +48,15 @@ static void shell_print_help(void)
     kprintf("fsinfo\n");
     kprintf("gpuinfo\n");
     kprintf("gpudemo\n");
+    kprintf("console [serial|graphics|both]\n");
+    kprintf("input [serial|keyboard|both]\n");
+    kprintf("gtest\n");
     kprintf("logls\n");
     kprintf("logcat <file>\n");
     kprintf("logcreate <file>\n");
     kprintf("logappend <file> <text>\n");
     kprintf("logfsinfo\n");
+    kprintf("pci\n");
     kprintf("virtio\n");
     kprintf("rng\n");
     kprintf("panic\n");
@@ -180,7 +190,7 @@ static void shell_print_gpuinfo(void)
 
     kprintf("gpu: virtio-gpu\n");
     kprintf("resolution: %u x %u\n", virtio_gpu_width(), virtio_gpu_height());
-    kprintf("stride: %u\n", fb->stride);
+    kprintf("pitch: %u\n", fb->pitch);
     kprintf("format: b8g8r8a8\n");
 }
 
@@ -190,6 +200,178 @@ static void shell_run_gpu_demo(void)
     {
         kprintf("gpudemo failed\n");
     }
+}
+
+static void shell_set_console_mode(const char *mode)
+{
+    if (*mode == '\0')
+    {
+        unsigned int output_mode;
+
+        output_mode = console_output_mode();
+        if (output_mode == CONSOLE_SINK_SERIAL)
+        {
+            kprintf("console: serial\n");
+        }
+        else if (output_mode == CONSOLE_SINK_GRAPHICS)
+        {
+            kprintf("console: graphics\n");
+        }
+        else if (output_mode == (CONSOLE_SINK_SERIAL | CONSOLE_SINK_GRAPHICS))
+        {
+            kprintf("console: both\n");
+        }
+        else
+        {
+            kprintf("console: none\n");
+        }
+        return;
+    }
+
+    if (strcmp(mode, "serial") == 0)
+    {
+        console_set_output_mode(CONSOLE_SINK_SERIAL);
+        return;
+    }
+
+    if (strcmp(mode, "graphics") == 0)
+    {
+        if (console_graphics_framebuffer() == 0)
+        {
+            kprintf("graphics console unavailable\n");
+            return;
+        }
+
+        console_set_output_mode(CONSOLE_SINK_GRAPHICS);
+        return;
+    }
+
+    if (strcmp(mode, "both") == 0)
+    {
+        if (console_graphics_framebuffer() == 0)
+        {
+            console_set_output_mode(CONSOLE_SINK_SERIAL);
+            kprintf("graphics console unavailable\n");
+            return;
+        }
+
+        console_set_output_mode(CONSOLE_SINK_SERIAL | CONSOLE_SINK_GRAPHICS);
+        return;
+    }
+
+    kprintf("usage: console [serial|graphics|both]\n");
+}
+
+static void shell_set_input_mode(const char *mode)
+{
+    unsigned int current_mode;
+
+    current_mode = console_input_mode();
+
+    if (*mode == '\0')
+    {
+        if (current_mode == INPUT_SOURCE_SERIAL)
+        {
+            kprintf("input: serial\n");
+        }
+        else if (current_mode == INPUT_SOURCE_KEYBOARD)
+        {
+            kprintf("input: keyboard\n");
+        }
+        else if (current_mode == (INPUT_SOURCE_SERIAL | INPUT_SOURCE_KEYBOARD))
+        {
+            kprintf("input: both\n");
+        }
+        else
+        {
+            kprintf("input: none\n");
+        }
+        return;
+    }
+
+    if (strcmp(mode, "serial") == 0)
+    {
+        console_set_input_mode(INPUT_SOURCE_SERIAL);
+        return;
+    }
+
+    if (strcmp(mode, "keyboard") == 0)
+    {
+        if (!input_keyboard_available())
+        {
+            kprintf("keyboard input unavailable\n");
+            return;
+        }
+
+        console_set_input_mode(INPUT_SOURCE_KEYBOARD);
+        return;
+    }
+
+    if (strcmp(mode, "both") == 0)
+    {
+        if (!input_keyboard_available())
+        {
+            console_set_input_mode(INPUT_SOURCE_SERIAL);
+            kprintf("keyboard input unavailable\n");
+            return;
+        }
+
+        console_set_input_mode(INPUT_SOURCE_SERIAL | INPUT_SOURCE_KEYBOARD);
+        return;
+    }
+
+    kprintf("usage: input [serial|keyboard|both]\n");
+}
+
+static void shell_run_gfx_test(void)
+{
+    static framebuffer_t *test_fb;
+    unsigned int base_color;
+    unsigned int accent_color;
+    unsigned int x;
+    unsigned int y;
+
+    if (test_fb == 0)
+    {
+        test_fb = fb_create_test(64U, 64U);
+    }
+
+    if (test_fb == 0)
+    {
+        kprintf("gtest failed: framebuffer allocation failed\n");
+        return;
+    }
+
+    base_color = 0x00112233U;
+    accent_color = 0x00abcdefU;
+
+    fb_clear(test_fb, base_color);
+    for (y = 0; y < test_fb->height; y++)
+    {
+        for (x = 0; x < test_fb->width; x++)
+        {
+            if (x == y || x + y == (test_fb->width - 1U))
+            {
+                fb_put_pixel(test_fb, x, y, accent_color);
+            }
+        }
+    }
+
+    if (fb_get_pixel(test_fb, 0U, 0U) != accent_color ||
+        fb_get_pixel(test_fb, test_fb->width / 2U, test_fb->height / 2U) != accent_color ||
+        fb_get_pixel(test_fb, 1U, 0U) != base_color ||
+        fb_get_pixel(test_fb, test_fb->width - 1U, 0U) != accent_color)
+    {
+        kprintf("gtest failed: pixel verification failed\n");
+        return;
+    }
+
+    kprintf("gtest ok: %ux%u pitch=%u bpp=%u format=%u\n",
+            test_fb->width,
+            test_fb->height,
+            test_fb->pitch,
+            test_fb->bytes_per_pixel,
+            (unsigned int)test_fb->pixel_format);
 }
 
 static void shell_print_logfsinfo(void)
@@ -315,6 +497,11 @@ static void shell_log_append(const char *args)
 static void shell_print_virtio(void)
 {
     virtio_print_devices();
+}
+
+static void shell_print_pci(void)
+{
+    pci_print_devices();
 }
 
 static void shell_block_read(const char *args)
@@ -649,6 +836,24 @@ static void shell_run_command(const char *line)
         return;
     }
 
+    if (shell_starts_with(line, "console"))
+    {
+        shell_set_console_mode(shell_skip_spaces(line + 7));
+        return;
+    }
+
+    if (shell_starts_with(line, "input"))
+    {
+        shell_set_input_mode(shell_skip_spaces(line + 5));
+        return;
+    }
+
+    if (strcmp(line, "gtest") == 0)
+    {
+        shell_run_gfx_test();
+        return;
+    }
+
     if (strcmp(line, "logls") == 0)
     {
         shell_log_list();
@@ -682,6 +887,12 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "virtio") == 0)
     {
         shell_print_virtio();
+        return;
+    }
+
+    if (strcmp(line, "pci") == 0)
+    {
+        shell_print_pci();
         return;
     }
 
