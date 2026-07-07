@@ -34,6 +34,7 @@ OBJS := \
 	$(BUILD_DIR)/desktop/desktop_app.o \
 	$(BUILD_DIR)/desktop/desktop_event.o \
 	$(BUILD_DIR)/desktop/desktop_input.o \
+	$(BUILD_DIR)/desktop/taskbar.o \
 	$(BUILD_DIR)/desktop/desktop_window.o \
 	$(BUILD_DIR)/fs/file.o \
 	$(BUILD_DIR)/fs/logfs.o \
@@ -147,7 +148,7 @@ $(BUILD_DIR)/drivers/virtio_rng.o: src/drivers/virtio_rng.c include/arch/aarch64
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/desktop.h include/desktop/desktop_app.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/desktop.h include/desktop/desktop_app.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/taskbar.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/kernel/timer.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -160,6 +161,10 @@ $(BUILD_DIR)/desktop/desktop_event.o: src/desktop/desktop_event.c include/deskto
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/desktop/desktop_input.o: src/desktop/desktop_input.c include/desktop/desktop_input.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/taskbar.o: src/desktop/taskbar.c include/desktop/taskbar.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 

@@ -2,6 +2,7 @@
 #include "desktop/desktop_app.h"
 #include "desktop/desktop_event.h"
 #include "desktop/desktop_input.h"
+#include "desktop/taskbar.h"
 #include "desktop/desktop_window.h"
 #include "arch/aarch64/cpu.h"
 #include "drivers/virtio_gpu.h"
@@ -9,16 +10,13 @@
 #include "gfx/draw.h"
 #include "gfx/font.h"
 #include "kernel/console.h"
+#include "kernel/timer.h"
 #include "lib/string.h"
 
 #define DESKTOP_MAX_WINDOWS 4U
 #define DESKTOP_MAX_APPS 4U
 #define DESKTOP_BG_COLOR 0xff6d8fa4U
 #define DESKTOP_ACCENT_COLOR 0xff89aebfU
-#define DESKTOP_TASKBAR_COLOR 0xff20313cU
-#define DESKTOP_TASKBAR_TEXT_COLOR 0xffffffffU
-#define DESKTOP_TASKBAR_HEIGHT 24
-#define DESKTOP_START_BG_COLOR 0xff2e596bU
 #define DESKTOP_PANEL_COLOR 0xff7ea2b3U
 #define DESKTOP_TEXT_COLOR 0xff102030U
 
@@ -39,6 +37,7 @@ typedef struct desktop_state
     unsigned int drag_offset_y;
     unsigned int saved_console_mode;
     unsigned int saved_input_mode;
+    int launcher_open;
     int initialized;
     int active;
     int dirty;
@@ -49,12 +48,11 @@ static desktop_state_t desktop_state;
 static void desktop_create_layout(void);
 static void desktop_handle_event(const desktop_event_t *event);
 static void desktop_draw_background(framebuffer_t *fb);
-static void desktop_draw_taskbar(framebuffer_t *fb);
 static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window_t *window);
 static int desktop_display_available(void);
 static unsigned int desktop_find_window_index_by_id(unsigned int id);
 static desktop_window_t *desktop_find_window_by_id(unsigned int id);
-static void desktop_bring_window_to_front(unsigned int window_index);
+static void desktop_cycle_focus_by_id(unsigned int window_id);
 
 static void desktop_create_layout(void)
 {
@@ -88,6 +86,8 @@ static void desktop_create_layout(void)
 
 static void desktop_handle_event(const desktop_event_t *event)
 {
+    desktop_window_t *window;
+
     if (event == 0)
     {
         return;
@@ -96,21 +96,64 @@ static void desktop_handle_event(const desktop_event_t *event)
     switch (event->type)
     {
     case DESKTOP_EVENT_REDRAW:
+        desktop_state.dirty = 1;
+        break;
     case DESKTOP_EVENT_KEY:
+        if (event->input.data.keycode == INPUT_KEY_TAB &&
+            (event->input.pressed == INPUT_KEY_PRESS || event->input.pressed == INPUT_KEY_REPEAT))
+        {
+            desktop_cycle_focus_by_id(event->target_window_id);
+        }
+        desktop_state.dirty = 1;
+        break;
     case DESKTOP_EVENT_CHAR:
+        if (event->character == '\t')
+        {
+            desktop_cycle_focus_by_id(event->target_window_id);
+        }
         desktop_state.dirty = 1;
         break;
     case DESKTOP_EVENT_BUTTON_DOWN:
     {
+        unsigned int button_window_id;
         unsigned int window_index;
-        desktop_window_t *window;
+
+        if (desktop_taskbar_launcher_hit_test(desktop_state.fb->height, event->cursor_x, event->cursor_y))
+        {
+            desktop_state.launcher_open = !desktop_state.launcher_open;
+            desktop_state.drag_window_id = 0U;
+            desktop_state.dirty = 1;
+            break;
+        }
+
+        button_window_id = desktop_taskbar_window_button_hit_test(desktop_state.windows,
+                                                                  desktop_state.window_count,
+                                                                  desktop_state.fb->width,
+                                                                  desktop_state.fb->height,
+                                                                  event->cursor_x,
+                                                                  event->cursor_y);
+        if (button_window_id != 0U)
+        {
+            window = desktop_find_window_by_id(button_window_id);
+            if (window != 0)
+            {
+                desktop_focus_window(window);
+                desktop_bring_to_front(window);
+            }
+            desktop_state.launcher_open = 0;
+            desktop_state.drag_window_id = 0U;
+            desktop_state.dirty = 1;
+            break;
+        }
 
         window_index = desktop_find_window_index_by_id(event->target_window_id);
         if (window_index < desktop_state.window_count)
         {
-            desktop_bring_window_to_front(window_index);
-            desktop_state.focused_window_index = desktop_state.window_count - 1U;
+            window = &desktop_state.windows[window_index];
+            desktop_focus_window(window);
+            desktop_bring_to_front(window);
             window = &desktop_state.windows[desktop_state.focused_window_index];
+            desktop_state.launcher_open = 0;
 
             if (desktop_window_title_hit_test(window, event->cursor_x, event->cursor_y))
             {
@@ -118,6 +161,10 @@ static void desktop_handle_event(const desktop_event_t *event)
                 desktop_state.drag_offset_x = event->cursor_x - (unsigned int)window->x;
                 desktop_state.drag_offset_y = event->cursor_y - (unsigned int)window->y;
             }
+        }
+        else if (desktop_taskbar_contains_point(desktop_state.fb->height, event->cursor_x, event->cursor_y))
+        {
+            desktop_state.launcher_open = 0;
         }
         desktop_state.dirty = 1;
         break;
@@ -128,15 +175,13 @@ static void desktop_handle_event(const desktop_event_t *event)
         desktop_state.dirty = 1;
         break;
     case DESKTOP_EVENT_CURSOR_MOVE:
-    {
-        desktop_window_t *window;
-
+    {    
         window = desktop_find_window_by_id(desktop_state.drag_window_id);
         if (window != 0)
         {
             window->x = (int)event->cursor_x - (int)desktop_state.drag_offset_x;
             window->y = (int)event->cursor_y - (int)desktop_state.drag_offset_y;
-            desktop_window_clamp_to_screen(window, desktop_state.fb->width, desktop_state.fb->height);
+            desktop_window_clamp_to_screen(window, desktop_state.fb->width, desktop_work_area_height());
         }
         desktop_state.dirty = 1;
         break;
@@ -160,7 +205,7 @@ static void desktop_draw_background(framebuffer_t *fb)
                        (int)(fb->width - right_panel_width),
                        52,
                        (int)right_panel_width,
-                       (int)fb->height - DESKTOP_TASKBAR_HEIGHT - 52,
+                       (int)desktop_work_area_height() - 52,
                        DESKTOP_PANEL_COLOR);
     }
 
@@ -171,29 +216,6 @@ static void desktop_draw_background(framebuffer_t *fb)
                     "Tab focus  Enter click",
                     0xffffffffU,
                     DESKTOP_ACCENT_COLOR);
-}
-
-static void desktop_draw_taskbar(framebuffer_t *fb)
-{
-    int taskbar_y;
-
-    taskbar_y = (int)fb->height - DESKTOP_TASKBAR_HEIGHT;
-    draw_fill_rect(fb, 0, taskbar_y, (int)fb->width, DESKTOP_TASKBAR_HEIGHT, DESKTOP_TASKBAR_COLOR);
-    draw_fill_rect(fb, 8, taskbar_y + 4, 68, DESKTOP_TASKBAR_HEIGHT - 8, DESKTOP_START_BG_COLOR);
-    draw_rect(fb, 8, taskbar_y + 4, 68, DESKTOP_TASKBAR_HEIGHT - 8, 0xffb9d7e3U);
-    gfx_draw_string(fb, 24, taskbar_y + 8, "Start", DESKTOP_TASKBAR_TEXT_COLOR, DESKTOP_START_BG_COLOR);
-    gfx_draw_string(fb,
-                    96,
-                    taskbar_y + 8,
-                    "Esc exit  Arrows/WASD move  Enter click",
-                    DESKTOP_TASKBAR_TEXT_COLOR,
-                    DESKTOP_TASKBAR_COLOR);
-    gfx_draw_string(fb,
-                    (int)fb->width - 152,
-                    taskbar_y + 8,
-                    "kernel-mode desktop",
-                    DESKTOP_TASKBAR_TEXT_COLOR,
-                    DESKTOP_TASKBAR_COLOR);
 }
 
 static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window_t *window)
@@ -219,7 +241,7 @@ static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window
     {
         gfx_draw_string(fb, x + 8, y + 10, "Desktop runtime online", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
         gfx_draw_string(fb, x + 8, y + 26, "Title bars can be dragged", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 42, "Press Escape to exit", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+        gfx_draw_string(fb, x + 8, y + 42, "Taskbar launcher below", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
     }
     else if (window->id == 2U)
     {
@@ -324,6 +346,58 @@ void desktop_exit(void)
     console_set_input_mode(desktop_state.saved_input_mode);
 }
 
+void desktop_focus_window(desktop_window_t *window)
+{
+    unsigned int window_index;
+
+    if (window == 0)
+    {
+        return;
+    }
+
+    window_index = desktop_find_window_index_by_id(window->id);
+    if (window_index >= desktop_state.window_count)
+    {
+        return;
+    }
+
+    desktop_state.focused_window_index = window_index;
+    desktop_state.dirty = 1;
+}
+
+void desktop_bring_to_front(desktop_window_t *window)
+{
+    desktop_window_t moved_window;
+    unsigned int window_index;
+    unsigned int index;
+
+    if (window == 0)
+    {
+        return;
+    }
+
+    window_index = desktop_find_window_index_by_id(window->id);
+    if (window_index >= desktop_state.window_count)
+    {
+        return;
+    }
+
+    if (window_index + 1U == desktop_state.window_count)
+    {
+        desktop_focus_window(window);
+        return;
+    }
+
+    moved_window = desktop_state.windows[window_index];
+    for (index = window_index; index + 1U < desktop_state.window_count; index++)
+    {
+        desktop_state.windows[index] = desktop_state.windows[index + 1U];
+    }
+    desktop_state.windows[desktop_state.window_count - 1U] = moved_window;
+    desktop_state.focused_window_index = desktop_state.window_count - 1U;
+    desktop_state.dirty = 1;
+}
+
 void desktop_run_once(void)
 {
     desktop_event_t event;
@@ -362,7 +436,14 @@ void desktop_render(void)
         desktop_draw_window_contents(desktop_state.fb, &desktop_state.windows[index]);
     }
 
-    desktop_draw_taskbar(desktop_state.fb);
+    desktop_taskbar_draw(desktop_state.fb,
+                         desktop_state.windows,
+                         desktop_state.window_count,
+                         (desktop_state.focused_window_index < desktop_state.window_count)
+                             ? desktop_state.windows[desktop_state.focused_window_index].id
+                             : 0U,
+                         timer_uptime_ms(),
+                         desktop_state.launcher_open);
     if (gfx_cursor_available())
     {
         gfx_cursor_refresh();
@@ -469,6 +550,16 @@ int desktop_is_active(void)
     return desktop_state.active;
 }
 
+unsigned int desktop_work_area_height(void)
+{
+    if (desktop_state.fb == 0 || desktop_state.fb->height <= desktop_taskbar_height())
+    {
+        return 0U;
+    }
+
+    return desktop_state.fb->height - desktop_taskbar_height();
+}
+
 static int desktop_display_available(void)
 {
     return desktop_state.fb != 0 && desktop_state.fb->buffer != 0 && virtio_gpu_available();
@@ -507,20 +598,16 @@ static desktop_window_t *desktop_find_window_by_id(unsigned int id)
     return &desktop_state.windows[index];
 }
 
-static void desktop_bring_window_to_front(unsigned int window_index)
+static void desktop_cycle_focus_by_id(unsigned int window_id)
 {
-    desktop_window_t window;
-    unsigned int index;
+    desktop_window_t *window;
 
-    if (window_index >= desktop_state.window_count || window_index + 1U == desktop_state.window_count)
+    window = desktop_find_window_by_id(window_id);
+    if (window == 0)
     {
         return;
     }
 
-    window = desktop_state.windows[window_index];
-    for (index = window_index; index + 1U < desktop_state.window_count; index++)
-    {
-        desktop_state.windows[index] = desktop_state.windows[index + 1U];
-    }
-    desktop_state.windows[desktop_state.window_count - 1U] = window;
+    desktop_focus_window(window);
+    desktop_bring_to_front(window);
 }

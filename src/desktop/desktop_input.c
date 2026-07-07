@@ -125,6 +125,8 @@ unsigned int desktop_input_route(const input_event_t *input_event,
 
     if (input_event->type == INPUT_EVENT_CHAR)
     {
+        unsigned int next_focus_index;
+
         if (input_event->data.character == 27)
         {
             return DESKTOP_INPUT_RESULT_EXIT;
@@ -132,12 +134,13 @@ unsigned int desktop_input_route(const input_event_t *input_event,
 
         if (input_event->data.character == '\t')
         {
-            *focused_window_index = desktop_find_next_focusable_window(windows,
-                                                                       window_count,
-                                                                       *focused_window_index);
-            event_out->type = DESKTOP_EVENT_CURSOR_MOVE;
-            event_out->target_window_id = (*focused_window_index < window_count)
-                                              ? windows[*focused_window_index].id
+            next_focus_index = desktop_find_next_focusable_window(windows,
+                                                                  window_count,
+                                                                  *focused_window_index);
+            desktop_event_from_input(event_out, input_event);
+            event_out->type = DESKTOP_EVENT_CHAR;
+            event_out->target_window_id = (next_focus_index < window_count)
+                                              ? windows[next_focus_index].id
                                               : 0U;
             event_out->cursor_x = *cursor_x;
             event_out->cursor_y = *cursor_y;
@@ -248,11 +251,6 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         input_event->data.keycode == INPUT_KEY_MOUSE_LEFT)
     {
         index = desktop_find_topmost_window(windows, window_count, *cursor_x, *cursor_y);
-        if (index < window_count)
-        {
-            *focused_window_index = index;
-        }
-
         desktop_event_from_input(event_out, input_event);
         event_out->type = desktop_input_is_key_pressed(input_event)
                               ? DESKTOP_EVENT_BUTTON_DOWN
@@ -279,10 +277,15 @@ unsigned int desktop_input_route(const input_event_t *input_event,
 
     if (input_event->data.keycode == INPUT_KEY_TAB)
     {
-        *focused_window_index = desktop_find_next_focusable_window(windows,
-                                                                   window_count,
-                                                                   *focused_window_index);
-        result |= DESKTOP_INPUT_RESULT_REDRAW;
+        index = desktop_find_next_focusable_window(windows,
+                                                   window_count,
+                                                   *focused_window_index);
+        desktop_event_from_input(event_out, input_event);
+        event_out->type = DESKTOP_EVENT_KEY;
+        event_out->target_window_id = (index < window_count) ? windows[index].id : 0U;
+        event_out->cursor_x = *cursor_x;
+        event_out->cursor_y = *cursor_y;
+        return DESKTOP_INPUT_RESULT_REDRAW;
     }
     else if (input_event->data.keycode == INPUT_KEY_LEFT ||
              input_event->data.keycode == INPUT_KEY_A)
