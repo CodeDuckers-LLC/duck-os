@@ -86,6 +86,8 @@ Run with a VirtIO GPU display device:
 make run-gfx
 ```
 
+`run-gfx` now also attaches a `virtio-keyboard-device`, so key presses in the QEMU window can reach the shell through the kernel input layer.
+
 Headless GPU bring-up with serial output only:
 
 ```sh

@@ -1,6 +1,6 @@
 #include "drivers/uart.h"
 #include "drivers/virtio_input.h"
-#include "kernel/input.h"
+#include "input/input.h"
 
 #define INPUT_QUEUE_CAPACITY 64U
 #define INPUT_MOD_SHIFT 0x01U
@@ -36,25 +36,14 @@ static int input_event_allowed(const input_event_t *event)
     return 0;
 }
 
-static void input_queue_push(const input_event_t *event)
+static int input_key_is_shift(unsigned short keycode)
 {
-    if (input_queue_is_full())
-    {
-        input_queue_head = (input_queue_head + 1U) % INPUT_QUEUE_CAPACITY;
-    }
-
-    input_queue[input_queue_tail] = *event;
-    input_queue_tail = (input_queue_tail + 1U) % INPUT_QUEUE_CAPACITY;
+    return keycode == INPUT_KEY_LEFTSHIFT || keycode == INPUT_KEY_RIGHTSHIFT;
 }
 
-static int input_key_is_shift(unsigned short code)
+static char input_translate_alpha(unsigned short keycode, unsigned int shifted)
 {
-    return code == INPUT_KEY_LEFTSHIFT || code == INPUT_KEY_RIGHTSHIFT;
-}
-
-static char input_translate_alpha(unsigned short code, unsigned int shifted)
-{
-    switch (code)
+    switch (keycode)
     {
     case INPUT_KEY_A: return shifted != 0U ? 'A' : 'a';
     case INPUT_KEY_B: return shifted != 0U ? 'B' : 'b';
@@ -87,9 +76,9 @@ static char input_translate_alpha(unsigned short code, unsigned int shifted)
     }
 }
 
-static char input_translate_digit(unsigned short code, unsigned int shifted)
+static char input_translate_digit(unsigned short keycode, unsigned int shifted)
 {
-    switch (code)
+    switch (keycode)
     {
     case INPUT_KEY_1: return shifted != 0U ? '!' : '1';
     case INPUT_KEY_2: return shifted != 0U ? '@' : '2';
@@ -106,9 +95,9 @@ static char input_translate_digit(unsigned short code, unsigned int shifted)
     }
 }
 
-static char input_translate_punctuation(unsigned short code, unsigned int shifted)
+static char input_translate_punctuation(unsigned short keycode, unsigned int shifted)
 {
-    switch (code)
+    switch (keycode)
     {
     case INPUT_KEY_SPACE: return ' ';
     case INPUT_KEY_ENTER: return '\n';
@@ -130,29 +119,37 @@ static char input_translate_punctuation(unsigned short code, unsigned int shifte
     }
 }
 
-static char input_translate_keypress(unsigned short code)
+static char input_translate_keypress(unsigned short keycode)
 {
     char ch;
     unsigned int shifted;
 
     shifted = (input_modifiers & INPUT_MOD_SHIFT) != 0U;
 
-    ch = input_translate_alpha(code, shifted);
+    ch = input_translate_alpha(keycode, shifted);
     if (ch != '\0')
     {
         return ch;
     }
 
-    ch = input_translate_digit(code, shifted);
+    ch = input_translate_digit(keycode, shifted);
     if (ch != '\0')
     {
         return ch;
     }
 
-    return input_translate_punctuation(code, shifted);
+    return input_translate_punctuation(keycode, shifted);
 }
 
-static void input_poll_sources(void)
+void input_init(void)
+{
+    input_queue_head = 0U;
+    input_queue_tail = 0U;
+    input_mode_flags = INPUT_SOURCE_SERIAL;
+    input_modifiers = 0U;
+}
+
+void input_poll(void)
 {
     if ((input_mode_flags & INPUT_SOURCE_SERIAL) != 0U && uart_can_read())
     {
@@ -163,14 +160,6 @@ static void input_poll_sources(void)
     {
         virtio_input_poll();
     }
-}
-
-void input_init(void)
-{
-    input_queue_head = 0U;
-    input_queue_tail = 0U;
-    input_mode_flags = INPUT_SOURCE_SERIAL;
-    input_modifiers = 0U;
 }
 
 void input_set_mode(unsigned int mode)
@@ -192,26 +181,21 @@ int input_keyboard_available(void)
     return virtio_input_available();
 }
 
-void input_queue_serial_char(char ch)
+int input_push_event(const input_event_t *event)
 {
-    input_event_t event;
+    if (event == 0)
+    {
+        return 0;
+    }
 
-    event.type = INPUT_EVENT_CHAR;
-    event.source = INPUT_SOURCE_SERIAL;
-    event.data.ch = ch;
-    input_queue_push(&event);
-}
+    if (input_queue_is_full())
+    {
+        input_queue_head = (input_queue_head + 1U) % INPUT_QUEUE_CAPACITY;
+    }
 
-void input_queue_key_event(unsigned short code, unsigned int value)
-{
-    input_event_t event;
-
-    event.type = INPUT_EVENT_KEY;
-    event.source = INPUT_SOURCE_KEYBOARD;
-    event.data.key.code = code;
-    event.data.key.state = (unsigned char)value;
-    event.data.key.modifiers = (unsigned char)input_modifiers;
-    input_queue_push(&event);
+    input_queue[input_queue_tail] = *event;
+    input_queue_tail = (input_queue_tail + 1U) % INPUT_QUEUE_CAPACITY;
+    return 1;
 }
 
 int input_pop_event(input_event_t *event_out)
@@ -226,52 +210,103 @@ int input_pop_event(input_event_t *event_out)
     return 1;
 }
 
-char input_getc(void)
+int input_has_event(void)
+{
+    return !input_queue_is_empty();
+}
+
+int input_event_to_char(const input_event_t *event, char *ch_out)
+{
+    char ch;
+
+    if (event == 0 || ch_out == 0 || !input_event_allowed(event))
+    {
+        return 0;
+    }
+
+    if (event->type == INPUT_EVENT_CHAR)
+    {
+        *ch_out = event->data.character;
+        return 1;
+    }
+
+    if (event->type != INPUT_EVENT_KEY)
+    {
+        return 0;
+    }
+
+    if (input_key_is_shift(event->data.keycode))
+    {
+        if (event->pressed == INPUT_KEY_RELEASE)
+        {
+            input_modifiers &= ~INPUT_MOD_SHIFT;
+        }
+        else
+        {
+            input_modifiers |= INPUT_MOD_SHIFT;
+        }
+        return 0;
+    }
+
+    if (event->pressed != INPUT_KEY_PRESS && event->pressed != INPUT_KEY_REPEAT)
+    {
+        return 0;
+    }
+
+    ch = input_translate_keypress(event->data.keycode);
+    if (ch == '\0')
+    {
+        return 0;
+    }
+
+    *ch_out = ch;
+    return 1;
+}
+
+void input_queue_serial_char(char ch)
 {
     input_event_t event;
 
+    event.type = INPUT_EVENT_CHAR;
+    event.source = INPUT_SOURCE_SERIAL;
+    event.data.character = ch;
+    event.pressed = INPUT_KEY_PRESS;
+    event.modifiers = 0U;
+    (void)input_push_event(&event);
+}
+
+void input_queue_key_event(unsigned short keycode, unsigned int pressed)
+{
+    input_event_t event;
+
+    event.type = INPUT_EVENT_KEY;
+    event.source = INPUT_SOURCE_KEYBOARD;
+    event.data.keycode = keycode;
+    event.pressed = (unsigned char)pressed;
+    event.modifiers = (unsigned char)input_modifiers;
+    (void)input_push_event(&event);
+}
+
+char input_getc(void)
+{
+    input_event_t event;
+    char ch;
+
     for (;;)
     {
-        while (!input_pop_event(&event))
+        while (!input_has_event())
         {
-            input_poll_sources();
+            input_poll();
         }
 
-        if (!input_event_allowed(&event))
+        if (!input_pop_event(&event))
         {
             continue;
         }
 
-        if (event.type == INPUT_EVENT_CHAR)
+        if (input_event_to_char(&event, &ch))
         {
-            return event.data.ch;
-        }
-
-        if (event.type == INPUT_EVENT_KEY)
-        {
-            if (input_key_is_shift(event.data.key.code))
-            {
-                if (event.data.key.state == INPUT_KEY_RELEASE)
-                {
-                    input_modifiers &= ~INPUT_MOD_SHIFT;
-                }
-                else
-                {
-                    input_modifiers |= INPUT_MOD_SHIFT;
-                }
-                continue;
-            }
-
-            if (event.data.key.state == INPUT_KEY_PRESS || event.data.key.state == INPUT_KEY_REPEAT)
-            {
-                char ch;
-
-                ch = input_translate_keypress(event.data.key.code);
-                if (ch != '\0')
-                {
-                    return ch;
-                }
-            }
+            return ch;
         }
     }
 }

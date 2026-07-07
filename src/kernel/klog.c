@@ -115,6 +115,7 @@ void kprintf(const char *format, ...)
     }
 
     spin_unlock_irqrestore(&kprintf_lock, flags);
+    console_flush();
     va_end(args);
 }
 

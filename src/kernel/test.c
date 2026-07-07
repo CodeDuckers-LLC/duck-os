@@ -612,11 +612,24 @@ static void test_graphics_console(void)
 
 static void test_input_layer(void)
 {
+    input_event_t event;
+    input_event_t popped;
     unsigned int saved_mode;
     char ch;
 
     saved_mode = input_mode();
     input_set_mode(INPUT_SOURCE_SERIAL | INPUT_SOURCE_KEYBOARD);
+
+    event.type = INPUT_EVENT_CHAR;
+    event.source = INPUT_SOURCE_SERIAL;
+    event.data.character = 'q';
+    event.pressed = INPUT_KEY_PRESS;
+    event.modifiers = 0U;
+    test_assert(input_push_event(&event) != 0, "input push event");
+    test_assert(input_has_event(), "input has event");
+    test_assert(input_pop_event(&popped) != 0, "input pop event");
+    test_assert(popped.type == INPUT_EVENT_CHAR, "input popped char type");
+    test_assert(popped.data.character == 'q', "input popped char value");
 
     input_queue_serial_char('s');
     ch = input_getc();

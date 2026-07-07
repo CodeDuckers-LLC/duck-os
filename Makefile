@@ -32,6 +32,8 @@ OBJS := \
 	$(BUILD_DIR)/fs/tinyfs.o \
 	$(BUILD_DIR)/fs/vfs.o \
 	$(BUILD_DIR)/gfx/draw.o \
+	$(BUILD_DIR)/gfx/cursor.o \
+	$(BUILD_DIR)/gui/gui.o \
 	$(BUILD_DIR)/gfx/font8x8.o \
 	$(BUILD_DIR)/gfx/framebuffer.o \
 	$(BUILD_DIR)/gfx/text.o \
@@ -43,7 +45,7 @@ OBJS := \
 	$(BUILD_DIR)/kernel/klog.o \
 	$(BUILD_DIR)/kernel/kmalloc.o \
 	$(BUILD_DIR)/kernel/initramfs.o \
-	$(BUILD_DIR)/kernel/input.o \
+	$(BUILD_DIR)/input/input.o \
 	$(BUILD_DIR)/kernel/memory_layout.o \
 	$(BUILD_DIR)/kernel/panic.o \
 	$(BUILD_DIR)/kernel/shell.o \
@@ -159,6 +161,14 @@ $(BUILD_DIR)/gfx/draw.o: src/gfx/draw.c include/gfx/draw.h include/gfx/framebuff
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/gfx/cursor.o: src/gfx/cursor.c include/gfx/cursor.h include/gfx/framebuffer.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/gui/gui.o: src/gui/gui.c include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/gui/gui.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(BUILD_DIR)/gfx/font8x8.o: src/gfx/font8x8.c include/gfx/font.h include/gfx/framebuffer.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -195,7 +205,7 @@ $(BUILD_DIR)/kernel/initramfs.o: src/kernel/initramfs.c include/kernel/initramfs
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/input.o: src/kernel/input.c include/drivers/uart.h include/drivers/virtio_input.h include/kernel/input.h | $(BUILD_DIR)
+$(BUILD_DIR)/input/input.o: src/input/input.c include/drivers/uart.h include/drivers/virtio_input.h include/input/input.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -211,7 +221,7 @@ $(BUILD_DIR)/kernel/panic.o: src/kernel/panic.c include/arch/aarch64/cpu.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/gui/gui.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -308,6 +318,8 @@ run-gfx: all
 		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
 		-device virtio-gpu-device,bus=virtio-mmio-bus.2 \
+		-device virtio-keyboard-device,bus=virtio-mmio-bus.3 \
+		-device virtio-tablet-device,bus=virtio-mmio-bus.4 \
 		-kernel $(KERNEL_ELF)
 
 run-gfx-headless: all
@@ -321,6 +333,8 @@ run-gfx-headless: all
 		-device virtio-rng-device,bus=virtio-mmio-bus.0 \
 		-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1 \
 		-device virtio-gpu-device,bus=virtio-mmio-bus.2 \
+		-device virtio-keyboard-device,bus=virtio-mmio-bus.3 \
+		-device virtio-tablet-device,bus=virtio-mmio-bus.4 \
 		-kernel $(KERNEL_ELF)
 
 run-exception-test:

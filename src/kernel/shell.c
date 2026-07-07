@@ -5,7 +5,11 @@
 #include "fs/file.h"
 #include "fs/logfs.h"
 #include "fs/vfs.h"
+#include "gfx/cursor.h"
+#include "gfx/draw.h"
 #include "gfx/framebuffer.h"
+#include "gfx/font.h"
+#include "gui/gui.h"
 #include "kernel/console.h"
 #include "kernel/input.h"
 #include "kernel/klog.h"
@@ -31,6 +35,8 @@ static const char *shell_skip_spaces(const char *text);
 static void shell_run_gfx_test(void);
 static void shell_set_console_mode(const char *mode);
 static void shell_set_input_mode(const char *mode);
+static void shell_move_cursor(const char *args);
+static void shell_run_gui_demo(void);
 
 static void shell_print_help(void)
 {
@@ -48,6 +54,8 @@ static void shell_print_help(void)
     kprintf("fsinfo\n");
     kprintf("gpuinfo\n");
     kprintf("gpudemo\n");
+    kprintf("cursor <x> <y>\n");
+    kprintf("gui demo\n");
     kprintf("console [serial|graphics|both]\n");
     kprintf("input [serial|keyboard|both]\n");
     kprintf("gtest\n");
@@ -372,6 +380,117 @@ static void shell_run_gfx_test(void)
             test_fb->pitch,
             test_fb->bytes_per_pixel,
             (unsigned int)test_fb->pixel_format);
+}
+
+static void shell_move_cursor(const char *args)
+{
+    char x_text[16];
+    char y_text[16];
+    framebuffer_t *fb;
+    unsigned long x;
+    unsigned long y;
+
+    args = shell_read_token(args, x_text, sizeof(x_text));
+    args = shell_read_token(args, y_text, sizeof(y_text));
+    if (x_text[0] == '\0' || y_text[0] == '\0')
+    {
+        kprintf("usage: cursor <x> <y>\n");
+        return;
+    }
+
+    if (shell_parse_unsigned_long(x_text, &x) != 0 || shell_parse_unsigned_long(y_text, &y) != 0)
+    {
+        kprintf("invalid cursor coordinates\n");
+        return;
+    }
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    kprintf("cursor: %u %u\n", (unsigned int)x, (unsigned int)y);
+    gfx_cursor_attach(fb);
+    gfx_cursor_move((unsigned int)x, (unsigned int)y);
+    (void)virtio_gpu_flush();
+}
+
+static void shell_gui_demo_status_draw(window_t *window, framebuffer_t *fb)
+{
+    int text_x;
+    int text_y;
+
+    text_x = window->x + 8;
+    text_y = window->y + GFX_FONT_HEIGHT + 10;
+    gfx_draw_string(fb, text_x, text_y, "duck-os compositor", 0xff102030U, 0xffd9e2ecU);
+    gfx_draw_string(fb, text_x, text_y + 12, "immediate-mode demo", 0xff102030U, 0xffd9e2ecU);
+    draw_fill_rect(fb, text_x, text_y + 28, 96, 10, 0xff2dce89U);
+    draw_rect(fb, text_x, text_y + 28, 128, 10, 0xff101010U);
+}
+
+static void shell_gui_demo_log_draw(window_t *window, framebuffer_t *fb)
+{
+    int x;
+    int y;
+
+    x = window->x + 8;
+    y = window->y + GFX_FONT_HEIGHT + 10;
+    draw_fill_rect(fb, x, y, (int)window->width - 16, (int)window->height - 24, 0xfff4efe6U);
+    gfx_draw_string(fb, x + 8, y + 8, "[ok] framebuffer online", 0xff3b2f2fU, 0xfff4efe6U);
+    gfx_draw_string(fb, x + 8, y + 20, "[ok] text rendering online", 0xff3b2f2fU, 0xfff4efe6U);
+    gfx_draw_string(fb, x + 8, y + 32, "[ok] cursor layer online", 0xff3b2f2fU, 0xfff4efe6U);
+}
+
+static void shell_run_gui_demo(void)
+{
+    static unsigned int status_window_id;
+    static unsigned int log_window_id;
+    framebuffer_t *fb;
+    window_t *window;
+
+    fb = console_graphics_framebuffer();
+    if (fb == 0 || !virtio_gpu_available())
+    {
+        kprintf("graphics framebuffer unavailable\n");
+        return;
+    }
+
+    gui_attach_framebuffer(fb);
+
+    if (status_window_id != 0U)
+    {
+        gui_destroy_window(status_window_id);
+        status_window_id = 0U;
+    }
+    if (log_window_id != 0U)
+    {
+        gui_destroy_window(log_window_id);
+        log_window_id = 0U;
+    }
+
+    window = gui_create_window(32, 24, 224, 96, "Status", shell_gui_demo_status_draw);
+    if (window == 0)
+    {
+        kprintf("gui demo failed\n");
+        return;
+    }
+    status_window_id = window->id;
+
+    window = gui_create_window(120, 144, 320, 120, "System", shell_gui_demo_log_draw);
+    if (window == 0)
+    {
+        gui_destroy_window(status_window_id);
+        status_window_id = 0U;
+        kprintf("gui demo failed\n");
+        return;
+    }
+    log_window_id = window->id;
+
+    gui_draw_all();
+    console_set_output_mode(CONSOLE_SINK_SERIAL);
+    kprintf("gui demo drawn on graphics display; shell output moved to serial\n");
 }
 
 static void shell_print_logfsinfo(void)
@@ -833,6 +952,18 @@ static void shell_run_command(const char *line)
     if (strcmp(line, "gpudemo") == 0)
     {
         shell_run_gpu_demo();
+        return;
+    }
+
+    if (shell_starts_with(line, "cursor"))
+    {
+        shell_move_cursor(shell_skip_spaces(line + 6));
+        return;
+    }
+
+    if (strcmp(line, "gui demo") == 0)
+    {
+        shell_run_gui_demo();
         return;
     }
 

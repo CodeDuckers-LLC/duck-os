@@ -31,6 +31,11 @@ Meaning:
 - `-device virtio-blk-device,drive=vdisk0,bus=virtio-mmio-bus.1`: attach one read-only-test VirtIO block device
 - `-kernel build/kernel.elf`: load kernel image directly
 
+`make run-gfx` adds:
+
+- `-device virtio-gpu-device,bus=virtio-mmio-bus.2`: attach the VirtIO GPU
+- `-device virtio-keyboard-device,bus=virtio-mmio-bus.3`: attach a VirtIO keyboard for graphical console input
+
 ## VirtIO MMIO
 
 Kernel scans QEMU `virt` MMIO window at boot and prints discovered VirtIO devices:

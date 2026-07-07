@@ -123,6 +123,43 @@ struct virtio_gpu_state
 
 static struct virtio_gpu_state virtio_gpu_state;
 
+static int virtio_gpu_clip_rect(unsigned int *x,
+                                unsigned int *y,
+                                unsigned int *width,
+                                unsigned int *height)
+{
+    unsigned int max_width;
+    unsigned int max_height;
+
+    if (x == 0 || y == 0 || width == 0 || height == 0)
+    {
+        return 0;
+    }
+
+    if (*width == 0U || *height == 0U)
+    {
+        return 0;
+    }
+
+    if (*x >= virtio_gpu_state.width || *y >= virtio_gpu_state.height)
+    {
+        return 0;
+    }
+
+    max_width = virtio_gpu_state.width - *x;
+    max_height = virtio_gpu_state.height - *y;
+    if (*width > max_width)
+    {
+        *width = max_width;
+    }
+    if (*height > max_height)
+    {
+        *height = max_height;
+    }
+
+    return *width != 0U && *height != 0U;
+}
+
 static void virtio_gpu_draw_demo(framebuffer_t *fb)
 {
     unsigned int viewport_width;
@@ -293,20 +330,39 @@ static int virtio_gpu_set_scanout(void)
 
 int virtio_gpu_flush(void)
 {
+    return virtio_gpu_flush_rect(0U, 0U, virtio_gpu_state.width, virtio_gpu_state.height);
+}
+
+int virtio_gpu_flush_rect(unsigned int x, unsigned int y, unsigned int width, unsigned int height)
+{
     struct virtio_gpu_transfer_to_host_2d transfer;
     struct virtio_gpu_resource_flush flush;
+    unsigned long sync_offset;
+    unsigned long sync_length;
 
     if (!virtio_gpu_available())
     {
         return -1;
     }
 
-    mmu_sync_for_device(virtio_gpu_state.framebuffer.buffer, virtio_gpu_state.framebuffer_size);
+    if (!virtio_gpu_clip_rect(&x, &y, &width, &height))
+    {
+        return 0;
+    }
+
+    sync_offset = ((unsigned long)y * virtio_gpu_state.framebuffer.pitch) +
+                  ((unsigned long)x * virtio_gpu_state.framebuffer.bytes_per_pixel);
+    sync_length = ((unsigned long)(height - 1U) * virtio_gpu_state.framebuffer.pitch) +
+                  ((unsigned long)width * virtio_gpu_state.framebuffer.bytes_per_pixel);
+    mmu_sync_for_device(virtio_gpu_state.framebuffer.buffer + sync_offset, sync_length);
 
     memset(&transfer, 0, sizeof(transfer));
     virtio_gpu_init_header(&transfer.hdr, VIRTIO_GPU_CMD_TRANSFER_TO_HOST_2D);
-    transfer.rect.width = virtio_gpu_state.width;
-    transfer.rect.height = virtio_gpu_state.height;
+    transfer.rect.x = x;
+    transfer.rect.y = y;
+    transfer.rect.width = width;
+    transfer.rect.height = height;
+    transfer.offset = sync_offset;
     transfer.resource_id = VIRTIO_GPU_RESOURCE_ID;
     if (virtio_gpu_simple_request(&transfer, sizeof(transfer), VIRTIO_GPU_RESP_OK_NODATA) != 0)
     {
@@ -315,8 +371,10 @@ int virtio_gpu_flush(void)
 
     memset(&flush, 0, sizeof(flush));
     virtio_gpu_init_header(&flush.hdr, VIRTIO_GPU_CMD_RESOURCE_FLUSH);
-    flush.rect.width = virtio_gpu_state.width;
-    flush.rect.height = virtio_gpu_state.height;
+    flush.rect.x = x;
+    flush.rect.y = y;
+    flush.rect.width = width;
+    flush.rect.height = height;
     flush.resource_id = VIRTIO_GPU_RESOURCE_ID;
     return virtio_gpu_simple_request(&flush, sizeof(flush), VIRTIO_GPU_RESP_OK_NODATA);
 }

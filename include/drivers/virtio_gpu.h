@@ -10,5 +10,6 @@ unsigned int virtio_gpu_height(void);
 const framebuffer_t *virtio_gpu_framebuffer(void);
 int virtio_gpu_redraw_demo(void);
 int virtio_gpu_flush(void);
+int virtio_gpu_flush_rect(unsigned int x, unsigned int y, unsigned int width, unsigned int height);
 
 #endif
