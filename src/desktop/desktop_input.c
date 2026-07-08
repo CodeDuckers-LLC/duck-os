@@ -101,6 +101,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
                                  unsigned int window_count,
                                  unsigned int fb_width,
                                  unsigned int fb_height,
+                                 int allow_exit,
                                  unsigned int *cursor_x,
                                  unsigned int *cursor_y,
                                  unsigned int *focused_window_index,
@@ -123,7 +124,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
     {
         unsigned int next_focus_index;
 
-        if (input_event->data.character == 27)
+        if (allow_exit && input_event->data.character == 27)
         {
             return DESKTOP_INPUT_RESULT_EXIT;
         }
@@ -192,7 +193,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         return result;
     }
 
-    if (input_event->data.keycode == INPUT_KEY_ESC)
+    if (allow_exit && input_event->data.keycode == INPUT_KEY_ESC)
     {
         if (desktop_input_is_key_pressed(input_event))
         {

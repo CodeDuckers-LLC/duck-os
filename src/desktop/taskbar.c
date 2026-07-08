@@ -1,19 +1,10 @@
 #include "desktop/taskbar.h"
+#include "desktop/desktop_theme.h"
 #include "gfx/draw.h"
 #include "gfx/font.h"
 #include "lib/string.h"
 
 #define DESKTOP_TASKBAR_HEIGHT 24U
-#define DESKTOP_TASKBAR_COLOR 0xff20313cU
-#define DESKTOP_TASKBAR_TEXT_COLOR 0xffffffffU
-#define DESKTOP_TASKBAR_ACCENT_COLOR 0xffb9d7e3U
-#define DESKTOP_TASKBAR_BUTTON_BG 0xff37505cU
-#define DESKTOP_TASKBAR_BUTTON_ACTIVE_BG 0xff2a6076U
-#define DESKTOP_TASKBAR_LAUNCHER_BG 0xff2e596bU
-#define DESKTOP_TASKBAR_MENU_BG 0xffd9e4eaU
-#define DESKTOP_TASKBAR_MENU_BORDER 0xff37505cU
-#define DESKTOP_TASKBAR_MENU_TEXT 0xff102030U
-#define DESKTOP_TASKBAR_MENU_ACTIVE_BG 0xff9dc8d8U
 #define DESKTOP_TASKBAR_PADDING 8
 #define DESKTOP_TASKBAR_LAUNCHER_WIDTH 68
 #define DESKTOP_TASKBAR_WINDOW_BUTTON_WIDTH 88
@@ -52,7 +43,8 @@ unsigned int desktop_taskbar_visible_window_count(const desktop_window_t *window
     count = 0U;
     for (index = 0; index < window_count; index++)
     {
-        if (windows[index].id != 0U)
+        if (windows[index].id != 0U &&
+            (windows[index].flags & DESKTOP_WINDOW_FLAG_NO_CONTROLS) == 0U)
         {
             count++;
         }
@@ -107,6 +99,16 @@ void desktop_taskbar_draw(framebuffer_t *fb,
                           unsigned long uptime_ms,
                           int launcher_open)
 {
+    const desktop_theme_t *theme;
+    unsigned int taskbar_color;
+    unsigned int text_color;
+    unsigned int accent_color;
+    unsigned int launcher_bg;
+    unsigned int button_bg;
+    unsigned int button_active_bg;
+    unsigned int menu_bg;
+    unsigned int menu_border;
+    unsigned int menu_active_bg;
     unsigned int index;
     int bar_y;
     int button_y;
@@ -117,29 +119,40 @@ void desktop_taskbar_draw(framebuffer_t *fb,
         return;
     }
 
+    theme = desktop_theme_get();
+    taskbar_color = theme->taskbar;
+    text_color = desktop_theme_lighten(theme->text, 208U);
+    accent_color = desktop_theme_lighten(theme->accent, 48U);
+    launcher_bg = desktop_theme_lighten(theme->taskbar, 24U);
+    button_bg = desktop_theme_lighten(theme->taskbar, 16U);
+    button_active_bg = theme->titlebar_active;
+    menu_bg = theme->window_body;
+    menu_border = desktop_theme_darken(theme->taskbar, 8U);
+    menu_active_bg = desktop_theme_lighten(theme->accent, 20U);
+
     bar_y = desktop_taskbar_y(fb->height);
     button_y = bar_y + 4;
 
-    draw_fill_rect(fb, 0, bar_y, (int)fb->width, (int)DESKTOP_TASKBAR_HEIGHT, DESKTOP_TASKBAR_COLOR);
+    draw_fill_rect(fb, 0, bar_y, (int)fb->width, (int)DESKTOP_TASKBAR_HEIGHT, taskbar_color);
 
     draw_fill_rect(fb,
                    DESKTOP_TASKBAR_PADDING,
                    button_y,
                    DESKTOP_TASKBAR_LAUNCHER_WIDTH,
                    (int)DESKTOP_TASKBAR_HEIGHT - 8,
-                   DESKTOP_TASKBAR_LAUNCHER_BG);
+                   launcher_bg);
     draw_rect(fb,
               DESKTOP_TASKBAR_PADDING,
               button_y,
               DESKTOP_TASKBAR_LAUNCHER_WIDTH,
               (int)DESKTOP_TASKBAR_HEIGHT - 8,
-              DESKTOP_TASKBAR_ACCENT_COLOR);
+              accent_color);
     gfx_draw_string(fb,
                     DESKTOP_TASKBAR_PADDING + 16,
                     bar_y + 8,
                     "Start",
-                    DESKTOP_TASKBAR_TEXT_COLOR,
-                    DESKTOP_TASKBAR_LAUNCHER_BG);
+                    text_color,
+                    launcher_bg);
 
     {
         unsigned int button_index;
@@ -150,18 +163,19 @@ void desktop_taskbar_draw(framebuffer_t *fb,
             unsigned int bg_color;
             int button_x;
 
-            if (windows[index].id == 0U)
+            if (windows[index].id == 0U ||
+                (windows[index].flags & DESKTOP_WINDOW_FLAG_NO_CONTROLS) != 0U)
             {
                 continue;
             }
 
             button_x = desktop_taskbar_window_button_x(button_index++);
             bg_color = windows[index].id == focused_window_id
-                           ? DESKTOP_TASKBAR_BUTTON_ACTIVE_BG
-                           : DESKTOP_TASKBAR_BUTTON_BG;
+                           ? button_active_bg
+                           : button_bg;
             if ((windows[index].flags & DESKTOP_WINDOW_FLAG_MINIMIZED) != 0U)
             {
-                bg_color = 0xff516974U;
+                bg_color = desktop_theme_darken(button_bg, 20U);
             }
 
             draw_fill_rect(fb,
@@ -175,12 +189,12 @@ void desktop_taskbar_draw(framebuffer_t *fb,
                       button_y,
                       DESKTOP_TASKBAR_WINDOW_BUTTON_WIDTH,
                       (int)DESKTOP_TASKBAR_HEIGHT - 8,
-                      DESKTOP_TASKBAR_ACCENT_COLOR);
+                      accent_color);
             gfx_draw_string(fb,
                             button_x + 6,
                             bar_y + 8,
                             windows[index].title,
-                            DESKTOP_TASKBAR_TEXT_COLOR,
+                            text_color,
                             bg_color);
         }
     }
@@ -190,8 +204,8 @@ void desktop_taskbar_draw(framebuffer_t *fb,
                     (int)fb->width - 72,
                     bar_y + 8,
                     uptime_text,
-                    DESKTOP_TASKBAR_TEXT_COLOR,
-                    DESKTOP_TASKBAR_COLOR);
+                    text_color,
+                    taskbar_color);
 
     if (launcher_open)
     {
@@ -211,19 +225,19 @@ void desktop_taskbar_draw(framebuffer_t *fb,
                        menu_y,
                        DESKTOP_TASKBAR_MENU_WIDTH,
                        (int)menu_height,
-                       DESKTOP_TASKBAR_MENU_BG);
+                       menu_bg);
         draw_rect(fb,
                   DESKTOP_TASKBAR_PADDING,
                   menu_y,
                   DESKTOP_TASKBAR_MENU_WIDTH,
                   (int)menu_height,
-                  DESKTOP_TASKBAR_MENU_BORDER);
+                  menu_border);
         gfx_draw_string(fb,
                         DESKTOP_TASKBAR_PADDING + 8,
                         menu_y + 10,
                         "Launcher",
-                        DESKTOP_TASKBAR_MENU_TEXT,
-                        DESKTOP_TASKBAR_MENU_BG);
+                        theme->text,
+                        menu_bg);
         for (index = 0; index < app_count; index++)
         {
             int item_y;
@@ -231,7 +245,7 @@ void desktop_taskbar_draw(framebuffer_t *fb,
             char item_text[DESKTOP_APP_DISPLAY_NAME_MAX + 4U];
 
             item_y = menu_y + (int)DESKTOP_TASKBAR_MENU_HEADER_HEIGHT + (int)(index * DESKTOP_TASKBAR_MENU_ITEM_HEIGHT);
-            item_bg = index == launcher_selected_index ? DESKTOP_TASKBAR_MENU_ACTIVE_BG : DESKTOP_TASKBAR_MENU_BG;
+            item_bg = index == launcher_selected_index ? menu_active_bg : menu_bg;
             if (index == launcher_selected_index)
             {
                 draw_fill_rect(fb,
@@ -253,7 +267,7 @@ void desktop_taskbar_draw(framebuffer_t *fb,
                             DESKTOP_TASKBAR_PADDING + 8,
                             item_y + 4,
                             item_text,
-                            DESKTOP_TASKBAR_MENU_TEXT,
+                            theme->text,
                             item_bg);
         }
     }
@@ -338,7 +352,8 @@ unsigned int desktop_taskbar_window_button_hit_test(const desktop_window_t *wind
         {
             int button_x;
 
-            if (windows[index].id == 0U)
+            if (windows[index].id == 0U ||
+                (windows[index].flags & DESKTOP_WINDOW_FLAG_NO_CONTROLS) != 0U)
             {
                 continue;
             }

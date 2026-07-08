@@ -90,7 +90,7 @@ static void shell_print_help(void)
     kprintf("  gtest                run an in-memory framebuffer self-test\n");
     kprintf("  gpudemo              redraw the built-in graphics demo\n");
     kprintf("  cursor <x> <y>       move the graphics cursor\n");
-    kprintf("  desktop [once]       run desktop mode or draw one frame\n");
+    kprintf("  desktop [once|state] run desktop mode, draw one frame, or print state\n");
     kprintf("  apps                 list built-in graphical apps\n");
     kprintf("  gui demo             draw demo GUI windows\n");
     kprintf("  gui files [index]    open the file browser and preselect an entry\n");
@@ -669,9 +669,15 @@ static void shell_run_desktop(const char *args)
         return;
     }
 
+    if (strcmp(args, "state") == 0)
+    {
+        desktop_debug_print_session_state();
+        return;
+    }
+
     if (*args != '\0')
     {
-        kprintf("usage: desktop [once]\n");
+        kprintf("usage: desktop [once|state]\n");
         return;
     }
 

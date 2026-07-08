@@ -318,6 +318,7 @@ static void text_editor_load_file(text_editor_state_t *state, const char *path)
     if (file == 0)
     {
         text_editor_set_status(state, "open failed");
+        (void)desktop_show_alert("File Open Error", "Editor could not open file");
         return;
     }
 
@@ -328,6 +329,7 @@ static void text_editor_load_file(text_editor_state_t *state, const char *path)
         state->text[0] = '\0';
         state->length = 0U;
         text_editor_set_status(state, "read failed");
+        (void)desktop_show_alert("File Open Error", "Editor could not read file");
         return;
     }
 
@@ -554,6 +556,7 @@ void text_editor_app_event(desktop_app_instance_t *instance,
         if (text_editor_save_button_hit_test(window, event->cursor_x, event->cursor_y))
         {
             text_editor_set_status(state, "save not supported yet");
+            (void)desktop_show_alert("Save Unsupported", "Saving files not supported yet");
         }
         return;
     }

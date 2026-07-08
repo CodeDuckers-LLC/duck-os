@@ -2,6 +2,7 @@
 #include "desktop/app_registry.h"
 #include "desktop/desktop_event.h"
 #include "desktop/desktop_input.h"
+#include "desktop/desktop_theme.h"
 #include "desktop/desktop_window.h"
 #include "desktop/taskbar.h"
 #include "arch/aarch64/cpu.h"
@@ -12,18 +13,18 @@
 #include "gfx/font.h"
 #include "kernel/console.h"
 #include "kernel/input.h"
+#include "kernel/klog.h"
 #include "kernel/timer.h"
 #include "lib/string.h"
 
 #define DESKTOP_MAX_WINDOWS 8U
-#define DESKTOP_BG_COLOR 0xff6d8fa4U
-#define DESKTOP_ACCENT_COLOR 0xff89aebfU
-#define DESKTOP_PANEL_COLOR 0xff7ea2b3U
-#define DESKTOP_TEXT_COLOR 0xff102030U
+#define DESKTOP_ALERT_WIDTH 320U
+#define DESKTOP_ALERT_HEIGHT 108U
 #define DESKTOP_DIALOG_MESSAGE_MAX 128U
 
 typedef struct desktop_dialog_state
 {
+    char title[DESKTOP_WINDOW_TITLE_MAX];
     char message[DESKTOP_DIALOG_MESSAGE_MAX];
 } desktop_dialog_state_t;
 
@@ -31,6 +32,7 @@ typedef struct desktop_state
 {
     framebuffer_t *fb;
     desktop_window_t windows[DESKTOP_MAX_WINDOWS];
+    desktop_session_state_t session;
     unsigned int window_count;
     unsigned int frame_counter;
     unsigned int cursor_x;
@@ -47,10 +49,11 @@ typedef struct desktop_state
     int initialized;
     int active;
     int dirty;
+    unsigned int modal_window_id;
 } desktop_state_t;
 
 static desktop_state_t desktop_state;
-static desktop_dialog_state_t desktop_open_error_dialog;
+static desktop_dialog_state_t desktop_alert_dialog;
 
 static void desktop_create_layout(void);
 static void desktop_handle_event(const desktop_event_t *event);
@@ -72,6 +75,11 @@ static int desktop_extension_matches(const char *extension, const char *expected
 static void desktop_set_dialog_message(desktop_dialog_state_t *state, const char *prefix, const char *path);
 static int desktop_show_open_error(const char *prefix, const char *path);
 static void desktop_recompute_focus(void);
+static void desktop_refresh_session_state(void);
+static int desktop_alert_ok_hit_test(const desktop_window_t *window, unsigned int x, unsigned int y);
+static int desktop_handle_modal_event(const desktop_event_t *event);
+static void desktop_center_window(desktop_window_t *window);
+static void desktop_close_modal_window(void);
 
 static void desktop_create_layout(void)
 {
@@ -91,6 +99,7 @@ static void desktop_create_layout(void)
                         232U,
                         116U,
                         "System");
+    desktop_refresh_session_state();
 }
 
 static void desktop_handle_event(const desktop_event_t *event)
@@ -98,6 +107,11 @@ static void desktop_handle_event(const desktop_event_t *event)
     desktop_window_t *window;
 
     if (event == 0)
+    {
+        return;
+    }
+
+    if (desktop_state.modal_window_id != 0U && desktop_handle_modal_event(event))
     {
         return;
     }
@@ -272,6 +286,7 @@ static void desktop_handle_event(const desktop_event_t *event)
             window->x = (int)event->cursor_x - (int)desktop_state.drag_offset_x;
             window->y = (int)event->cursor_y - (int)desktop_state.drag_offset_y;
             desktop_window_clamp_to_screen(window, desktop_state.fb->width, desktop_work_area_height());
+            desktop_refresh_session_state();
         }
         desktop_state.dirty = 1;
         break;
@@ -282,10 +297,19 @@ static void desktop_handle_event(const desktop_event_t *event)
 
 static void desktop_draw_background(framebuffer_t *fb)
 {
+    const desktop_theme_t *theme;
+    unsigned int header_color;
+    unsigned int panel_color;
+    unsigned int text_color;
     unsigned int right_panel_width;
 
-    fb_clear(fb, DESKTOP_BG_COLOR);
-    draw_fill_rect(fb, 0, 0, (int)fb->width, 52, DESKTOP_ACCENT_COLOR);
+    theme = desktop_theme_get();
+    header_color = desktop_theme_lighten(theme->accent, 12U);
+    panel_color = desktop_theme_darken(theme->accent, 16U);
+    text_color = desktop_theme_lighten(theme->text, 208U);
+
+    fb_clear(fb, theme->background);
+    draw_fill_rect(fb, 0, 0, (int)fb->width, 52, header_color);
 
     right_panel_width = fb->width / 4U;
     if (right_panel_width > 0U)
@@ -295,24 +319,33 @@ static void desktop_draw_background(framebuffer_t *fb)
                        52,
                        (int)right_panel_width,
                        (int)desktop_work_area_height() - 52,
-                       DESKTOP_PANEL_COLOR);
+                       panel_color);
     }
 
-    gfx_draw_string(fb, 24, 18, "duck-os desktop", 0xffffffffU, DESKTOP_ACCENT_COLOR);
+    gfx_draw_string(fb, 24, 18, "duck-os desktop", text_color, header_color);
     gfx_draw_string(fb,
                     (int)fb->width - 176,
                     18,
                     "F1 launcher  Enter click",
-                    0xffffffffU,
-                    DESKTOP_ACCENT_COLOR);
+                    text_color,
+                    header_color);
 }
 
 static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window_t *window)
 {
+    const desktop_theme_t *theme;
+    unsigned int body_color;
+    unsigned int border_color;
+    unsigned int text_color;
     int x;
     int y;
     unsigned int width;
     unsigned int height;
+
+    theme = desktop_theme_get();
+    body_color = desktop_theme_lighten(theme->window_body, 18U);
+    border_color = desktop_theme_darken(theme->accent, 18U);
+    text_color = theme->text;
 
     x = desktop_window_content_x(window);
     y = desktop_window_content_y(window);
@@ -323,8 +356,8 @@ static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window
         return;
     }
 
-    draw_fill_rect(fb, x, y, (int)width, (int)height, 0xffeef4f7U);
-    draw_rect(fb, x, y, (int)width, (int)height, 0xff8ca2adU);
+    draw_fill_rect(fb, x, y, (int)width, (int)height, body_color);
+    draw_rect(fb, x, y, (int)width, (int)height, border_color);
 
     if (window->owner != 0 && window->owner->app != 0 && window->owner->app->on_render != 0)
     {
@@ -340,38 +373,46 @@ static void desktop_draw_window_contents(framebuffer_t *fb, const desktop_window
 
     if (window->id == 1U)
     {
-        gfx_draw_string(fb, x + 8, y + 10, "Desktop runtime online", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 26, "Title bars can be dragged", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 42, "Taskbar launcher below", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+        gfx_draw_string(fb, x + 8, y + 10, "Desktop runtime online", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 26, "Title bars can be dragged", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 42, "Taskbar launcher below", text_color, body_color);
     }
     else if (window->id == 2U)
     {
-        gfx_draw_string(fb, x + 8, y + 10, "Renderer: framebuffer", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 26, "Input: focus + drag routing", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 42, "Loop: cooperative", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+        gfx_draw_string(fb, x + 8, y + 10, "Renderer: framebuffer", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 26, "Input: focus + drag routing", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 42, "Loop: cooperative", text_color, body_color);
         if (desktop_state.primary_button_down != 0U)
         {
-            gfx_draw_string(fb, x + 8, y + 58, "Pointer: button down", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+            gfx_draw_string(fb, x + 8, y + 58, "Pointer: button down", text_color, body_color);
         }
         else
         {
-            gfx_draw_string(fb, x + 8, y + 58, "Pointer: button up", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+            gfx_draw_string(fb, x + 8, y + 58, "Pointer: button up", text_color, body_color);
         }
     }
     else
     {
-        gfx_draw_string(fb, x + 8, y + 10, "App placeholder window", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 26, window->title, DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 42, "Kernel-mode built-in app", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
-        gfx_draw_string(fb, x + 8, y + 58, "Registry launch path works", DESKTOP_TEXT_COLOR, 0xffeef4f7U);
+        gfx_draw_string(fb, x + 8, y + 10, "App placeholder window", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 26, window->title, text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 42, "Kernel-mode built-in app", text_color, body_color);
+        gfx_draw_string(fb, x + 8, y + 58, "Registry launch path works", text_color, body_color);
     }
 }
 
 static void desktop_dialog_draw(const desktop_window_t *window, framebuffer_t *fb, void *user_data)
 {
     desktop_dialog_state_t *state;
+    const desktop_theme_t *theme;
+    unsigned int body_color;
+    unsigned int border_color;
+    unsigned int text_color;
+    unsigned int muted_color;
+    unsigned int button_color;
     int x;
     int y;
+    int button_x;
+    int button_y;
     unsigned int width;
     unsigned int height;
 
@@ -380,16 +421,28 @@ static void desktop_dialog_draw(const desktop_window_t *window, framebuffer_t *f
     {
         return;
     }
+    theme = desktop_theme_get();
+    body_color = desktop_theme_lighten(theme->window_body, 10U);
+    border_color = desktop_theme_darken(theme->accent, 24U);
+    text_color = theme->text;
+    muted_color = desktop_theme_darken(theme->text, 16U);
+    button_color = desktop_theme_lighten(theme->accent, 16U);
 
     x = desktop_window_content_x(window);
     y = desktop_window_content_y(window);
     width = desktop_window_content_width(window);
     height = desktop_window_content_height(window);
 
-    draw_fill_rect(fb, x, y, (int)width, (int)height, 0xfffff2dbU);
-    draw_rect(fb, x, y, (int)width, (int)height, 0xff9d7f67U);
-    gfx_draw_string(fb, x + 8, y + 10, state->message, 0xff3b2f2fU, 0xfffff2dbU);
-    gfx_draw_string(fb, x + 8, y + 28, "Use editor for .txt .md .log", 0xff6a5646U, 0xfffff2dbU);
+    draw_fill_rect(fb, x, y, (int)width, (int)height, body_color);
+    draw_rect(fb, x, y, (int)width, (int)height, border_color);
+    gfx_draw_string(fb, x + 8, y + 10, state->message, text_color, body_color);
+    gfx_draw_string(fb, x + 8, y + 28, "Enter Esc dismiss", muted_color, body_color);
+
+    button_x = x + ((int)width - 52) / 2;
+    button_y = y + (int)height - 26;
+    draw_fill_rect(fb, button_x, button_y, 52, 16, button_color);
+    draw_rect(fb, button_x, button_y, 52, 16, border_color);
+    gfx_draw_string(fb, button_x + 18, button_y + 4, "OK", text_color, button_color);
 }
 
 int desktop_init(void)
@@ -409,11 +462,13 @@ int desktop_init(void)
 
     memset(&desktop_state, 0, sizeof(desktop_state));
     desktop_state.fb = fb;
+    desktop_theme_init();
     desktop_state.initialized = 1;
     desktop_state.active = 0;
     desktop_state.dirty = 1;
     (void)desktop_list_apps(0);
     desktop_create_layout();
+    desktop_refresh_session_state();
     desktop_input_reset(fb->width,
                         fb->height,
                         &desktop_state.cursor_x,
@@ -494,6 +549,7 @@ void desktop_focus_window(desktop_window_t *window)
     }
 
     desktop_state.focused_window_index = window_index;
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -532,6 +588,7 @@ void desktop_bring_to_front(desktop_window_t *window)
     }
     desktop_state.windows[desktop_state.window_count - 1U] = moved_window;
     desktop_state.focused_window_index = desktop_state.window_count - 1U;
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -570,12 +627,32 @@ void desktop_render(void)
 
     for (index = 0; index < desktop_state.window_count; index++)
     {
+        if (desktop_state.modal_window_id != 0U &&
+            desktop_state.windows[index].id == desktop_state.modal_window_id)
+        {
+            continue;
+        }
         desktop_window_draw(&desktop_state.windows[index],
                             desktop_state.fb,
                             index == desktop_state.focused_window_index);
         if (desktop_window_is_visible(&desktop_state.windows[index]))
         {
             desktop_draw_window_contents(desktop_state.fb, &desktop_state.windows[index]);
+        }
+    }
+
+    if (desktop_state.modal_window_id != 0U)
+    {
+        desktop_window_t *modal_window;
+
+        modal_window = desktop_find_window_by_id(desktop_state.modal_window_id);
+        if (modal_window != 0)
+        {
+            desktop_window_draw(modal_window, desktop_state.fb, 1);
+            if (desktop_window_is_visible(modal_window))
+            {
+                desktop_draw_window_contents(desktop_state.fb, modal_window);
+            }
         }
     }
 
@@ -646,6 +723,7 @@ void desktop_run(void)
                                                desktop_state.window_count,
                                                desktop_state.fb->width,
                                                desktop_state.fb->height,
+                                               desktop_state.modal_window_id == 0U,
                                                &desktop_state.cursor_x,
                                                &desktop_state.cursor_y,
                                                &desktop_state.focused_window_index,
@@ -740,6 +818,7 @@ void desktop_destroy_window(desktop_window_t *window)
     desktop_state.drag_window_id = 0U;
     desktop_app_instance_window_closed(owner);
     desktop_recompute_focus();
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -762,6 +841,7 @@ void desktop_minimize_window(desktop_window_t *window)
     desktop_state.windows[window_index].flags |= DESKTOP_WINDOW_FLAG_MINIMIZED;
     desktop_state.drag_window_id = 0U;
     desktop_recompute_focus();
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -807,6 +887,7 @@ void desktop_toggle_maximize_window(desktop_window_t *window)
     target->flags &= ~DESKTOP_WINDOW_FLAG_MINIMIZED;
     target->flags |= DESKTOP_WINDOW_FLAG_VISIBLE;
     desktop_state.drag_window_id = 0U;
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -856,6 +937,122 @@ int desktop_open_file(const char *path)
     return -1;
 }
 
+int desktop_show_alert(const char *title, const char *message)
+{
+    desktop_window_t *window;
+
+    if (!desktop_state.initialized && desktop_init() != 0)
+    {
+        return -1;
+    }
+
+    if (title == 0 || *title == '\0' || message == 0 || *message == '\0')
+    {
+        return -1;
+    }
+
+    strlcpy(desktop_alert_dialog.title, title, sizeof(desktop_alert_dialog.title));
+    strlcpy(desktop_alert_dialog.message, message, sizeof(desktop_alert_dialog.message));
+
+    if (desktop_state.modal_window_id != 0U)
+    {
+        window = desktop_find_window_by_id(desktop_state.modal_window_id);
+        if (window != 0)
+        {
+            strlcpy(window->title, desktop_alert_dialog.title, sizeof(window->title));
+            window->user_data = &desktop_alert_dialog;
+            desktop_center_window(window);
+            desktop_focus_window(window);
+            desktop_bring_to_front(window);
+            desktop_state.drag_window_id = 0U;
+            desktop_state.launcher_open = 0;
+            desktop_state.dirty = 1;
+            return 0;
+        }
+        desktop_state.modal_window_id = 0U;
+    }
+
+    if (desktop_state.window_count >= DESKTOP_MAX_WINDOWS)
+    {
+        return -1;
+    }
+
+    window = &desktop_state.windows[desktop_state.window_count++];
+    desktop_window_init(window,
+                        desktop_next_window_id(),
+                        0,
+                        0,
+                        DESKTOP_ALERT_WIDTH,
+                        DESKTOP_ALERT_HEIGHT,
+                        desktop_alert_dialog.title);
+    desktop_window_bind(window, desktop_dialog_draw, 0, &desktop_alert_dialog);
+    window->flags |= DESKTOP_WINDOW_FLAG_NO_CONTROLS;
+    desktop_center_window(window);
+    desktop_state.modal_window_id = window->id;
+    desktop_focus_window(window);
+    desktop_bring_to_front(window);
+    desktop_state.drag_window_id = 0U;
+    desktop_state.launcher_open = 0;
+    desktop_refresh_session_state();
+    desktop_state.dirty = 1;
+    return 0;
+}
+
+int desktop_get_session_state(desktop_session_state_t *state_out)
+{
+    if (state_out == 0)
+    {
+        return -1;
+    }
+
+    desktop_refresh_session_state();
+    *state_out = desktop_state.session;
+    return 0;
+}
+
+void desktop_debug_print_session_state(void)
+{
+    const desktop_session_state_t *session;
+    unsigned int index;
+
+    desktop_refresh_session_state();
+    session = &desktop_state.session;
+
+    kprintf("desktop session\n");
+    kprintf("  windows: %u\n", session->window_count);
+    kprintf("  focused window: %u\n", session->focused_window_id);
+    kprintf("  focused app: %s", session->focused_app_name[0] != '\0' ? session->focused_app_name : "(system)");
+    if (session->focused_app_instance_id != 0U)
+    {
+        kprintf(" #%u", session->focused_app_instance_id);
+    }
+    kprintf("\n");
+    kprintf("  modal window: %u\n", session->modal_window_id);
+    kprintf("  launcher: %s\n", session->launcher_open ? "open" : "closed");
+
+    for (index = 0; index < session->window_count && index < DESKTOP_SESSION_WINDOW_MAX; index++)
+    {
+        const desktop_session_window_state_t *window;
+
+        window = &session->windows[index];
+        kprintf("  [%u] id=%u title=%s app=%s",
+                window->z_index,
+                window->id,
+                window->title,
+                window->app_name[0] != '\0' ? window->app_name : "(system)");
+        if (window->owner_instance_id != 0U)
+        {
+            kprintf(" #%u", window->owner_instance_id);
+        }
+        kprintf(" pos=(%d,%d) size=%ux%u flags=%x\n",
+                window->x,
+                window->y,
+                window->width,
+                window->height,
+                window->flags);
+    }
+}
+
 int desktop_open_app_instance_window(desktop_app_instance_t *instance,
                                      const char *title,
                                      unsigned int width,
@@ -899,6 +1096,7 @@ int desktop_open_app_instance_window(desktop_app_instance_t *instance,
     desktop_window_clamp_to_screen(window, desktop_state.fb->width, desktop_work_area_height());
     desktop_focus_window(window);
     desktop_bring_to_front(window);
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 
     if (desktop_state.active)
@@ -943,6 +1141,7 @@ int desktop_open_custom_window(const char *title,
             desktop_window_bind(&desktop_state.windows[index], draw, handle_event, user_data);
             desktop_focus_window(&desktop_state.windows[index]);
             desktop_bring_to_front(&desktop_state.windows[index]);
+            desktop_refresh_session_state();
             return 0;
         }
     }
@@ -967,6 +1166,7 @@ int desktop_open_custom_window(const char *title,
     desktop_window_clamp_to_screen(window, desktop_state.fb->width, desktop_work_area_height());
     desktop_focus_window(window);
     desktop_bring_to_front(window);
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 
     if (desktop_state.active)
@@ -1064,6 +1264,7 @@ static void desktop_toggle_launcher(void)
     {
         desktop_state.launcher_selected_index = 0U;
     }
+    desktop_refresh_session_state();
     desktop_state.dirty = 1;
 }
 
@@ -1209,13 +1410,8 @@ static void desktop_set_dialog_message(desktop_dialog_state_t *state, const char
 
 static int desktop_show_open_error(const char *prefix, const char *path)
 {
-    desktop_set_dialog_message(&desktop_open_error_dialog, prefix, path);
-    return desktop_open_custom_window("Open Error",
-                                      320U,
-                                      108U,
-                                      desktop_dialog_draw,
-                                      0,
-                                      &desktop_open_error_dialog);
+    desktop_set_dialog_message(&desktop_alert_dialog, prefix, path);
+    return desktop_show_alert("File Open Error", desktop_alert_dialog.message);
 }
 
 static void desktop_recompute_focus(void)
@@ -1238,4 +1434,178 @@ static void desktop_recompute_focus(void)
     }
 
     desktop_state.focused_window_index = desktop_state.window_count - 1U;
+}
+
+static void desktop_refresh_session_state(void)
+{
+    desktop_session_state_t *session;
+    unsigned int focused_window_id;
+    unsigned int index;
+
+    session = &desktop_state.session;
+    memset(session, 0, sizeof(*session));
+
+    session->window_count = desktop_state.window_count;
+    session->modal_window_id = desktop_state.modal_window_id;
+    session->launcher_open = desktop_state.launcher_open;
+    focused_window_id = (desktop_state.focused_window_index < desktop_state.window_count)
+                            ? desktop_state.windows[desktop_state.focused_window_index].id
+                            : 0U;
+    session->focused_window_id = focused_window_id;
+
+    for (index = 0; index < desktop_state.window_count && index < DESKTOP_SESSION_WINDOW_MAX; index++)
+    {
+        const desktop_window_t *window;
+        desktop_session_window_state_t *entry;
+
+        window = &desktop_state.windows[index];
+        entry = &session->windows[index];
+        entry->id = window->id;
+        entry->x = window->x;
+        entry->y = window->y;
+        entry->width = window->width;
+        entry->height = window->height;
+        entry->flags = window->flags;
+        entry->z_index = index;
+        strlcpy(entry->title, window->title, sizeof(entry->title));
+        if (window->owner != 0)
+        {
+            entry->owner_instance_id = window->owner->id;
+            if (window->owner->app != 0)
+            {
+                strlcpy(entry->app_name, window->owner->app->name, sizeof(entry->app_name));
+            }
+        }
+
+        if (window->id == focused_window_id && window->owner != 0)
+        {
+            session->focused_app_instance_id = window->owner->id;
+            if (window->owner->app != 0)
+            {
+                strlcpy(session->focused_app_name,
+                        window->owner->app->name,
+                        sizeof(session->focused_app_name));
+            }
+        }
+    }
+}
+
+static int desktop_alert_ok_hit_test(const desktop_window_t *window, unsigned int x, unsigned int y)
+{
+    int content_x;
+    int content_y;
+    unsigned int content_width;
+    unsigned int content_height;
+    int button_x;
+    int button_y;
+
+    if (window == 0)
+    {
+        return 0;
+    }
+
+    content_x = desktop_window_content_x(window);
+    content_y = desktop_window_content_y(window);
+    content_width = desktop_window_content_width(window);
+    content_height = desktop_window_content_height(window);
+    button_x = content_x + ((int)content_width - 52) / 2;
+    button_y = content_y + (int)content_height - 26;
+
+    return x >= (unsigned int)button_x &&
+           x < (unsigned int)(button_x + 52) &&
+           y >= (unsigned int)button_y &&
+           y < (unsigned int)(button_y + 16);
+}
+
+static int desktop_handle_modal_event(const desktop_event_t *event)
+{
+    desktop_window_t *window;
+
+    window = desktop_find_window_by_id(desktop_state.modal_window_id);
+    if (window == 0)
+    {
+        desktop_state.modal_window_id = 0U;
+        return 0;
+    }
+
+    if (event->type == DESKTOP_EVENT_REDRAW)
+    {
+        desktop_state.dirty = 1;
+        return 1;
+    }
+
+    if (event->type == DESKTOP_EVENT_KEY &&
+        (event->input.pressed == INPUT_KEY_PRESS || event->input.pressed == INPUT_KEY_REPEAT) &&
+        (event->input.data.keycode == INPUT_KEY_ENTER || event->input.data.keycode == INPUT_KEY_ESC))
+    {
+        desktop_close_modal_window();
+        return 1;
+    }
+
+    if (event->type == DESKTOP_EVENT_CHAR &&
+        (event->character == '\n' || event->character == '\r' || event->character == 27))
+    {
+        desktop_close_modal_window();
+        return 1;
+    }
+
+    if (event->type == DESKTOP_EVENT_BUTTON_DOWN)
+    {
+        desktop_focus_window(window);
+        desktop_bring_to_front(window);
+        if (desktop_alert_ok_hit_test(window, event->cursor_x, event->cursor_y))
+        {
+            desktop_close_modal_window();
+        }
+        else
+        {
+            desktop_state.dirty = 1;
+        }
+        return 1;
+    }
+
+    if (event->type == DESKTOP_EVENT_BUTTON_UP ||
+        event->type == DESKTOP_EVENT_CURSOR_MOVE)
+    {
+        desktop_state.dirty = 1;
+        return 1;
+    }
+
+    return 1;
+}
+
+static void desktop_center_window(desktop_window_t *window)
+{
+    unsigned int screen_height;
+
+    if (window == 0 || desktop_state.fb == 0)
+    {
+        return;
+    }
+
+    screen_height = desktop_work_area_height();
+    window->x = ((int)desktop_state.fb->width - (int)window->width) / 2;
+    window->y = ((int)screen_height - (int)window->height) / 2;
+    if (window->y < 0)
+    {
+        window->y = 0;
+    }
+    desktop_window_clamp_to_screen(window, desktop_state.fb->width, screen_height);
+}
+
+static void desktop_close_modal_window(void)
+{
+    desktop_window_t *window;
+
+    if (desktop_state.modal_window_id == 0U)
+    {
+        return;
+    }
+
+    window = desktop_find_window_by_id(desktop_state.modal_window_id);
+    desktop_state.modal_window_id = 0U;
+    if (window != 0)
+    {
+        desktop_destroy_window(window);
+    }
 }

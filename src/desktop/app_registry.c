@@ -146,10 +146,18 @@ int desktop_launch_app_with_argument(const char *name, const char *argument)
 {
     const desktop_app_t *app;
     desktop_app_instance_t *instance;
+    char message[DESKTOP_APP_NAME_MAX + 24U];
 
     app = desktop_find_app(name);
     if (app == 0)
     {
+        memset(message, 0, sizeof(message));
+        strlcpy(message, "No app named ", sizeof(message));
+        if (name != 0)
+        {
+            strlcpy(message + strlen(message), name, sizeof(message) - strlen(message));
+        }
+        (void)desktop_show_alert("Unknown App", message);
         return -1;
     }
 

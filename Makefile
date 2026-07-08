@@ -34,6 +34,7 @@ OBJS := \
 	$(BUILD_DIR)/desktop/desktop.o \
 	$(BUILD_DIR)/desktop/desktop_event.o \
 	$(BUILD_DIR)/desktop/desktop_input.o \
+	$(BUILD_DIR)/desktop/desktop_theme.o \
 	$(BUILD_DIR)/desktop/files_app.o \
 	$(BUILD_DIR)/desktop/terminal_app.o \
 	$(BUILD_DIR)/desktop/text_editor_app.o \
@@ -156,7 +157,7 @@ $(BUILD_DIR)/desktop/app_registry.o: src/desktop/app_registry.c include/desktop/
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/app_registry.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/taskbar.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/kernel/input.h include/kernel/timer.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/app_registry.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/desktop_theme.h include/desktop/taskbar.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/kernel/input.h include/kernel/timer.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -165,6 +166,10 @@ $(BUILD_DIR)/desktop/desktop_event.o: src/desktop/desktop_event.c include/deskto
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/desktop/desktop_input.o: src/desktop/desktop_input.c include/desktop/desktop_input.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/desktop_theme.o: src/desktop/desktop_theme.c include/desktop/desktop_theme.h include/fs/file.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -180,11 +185,11 @@ $(BUILD_DIR)/desktop/text_editor_app.o: src/desktop/text_editor_app.c include/de
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/taskbar.o: src/desktop/taskbar.c include/desktop/app_registry.h include/desktop/taskbar.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/taskbar.o: src/desktop/taskbar.c include/desktop/app_registry.h include/desktop/taskbar.h include/desktop/desktop_theme.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/desktop_window.o: src/desktop/desktop_window.c include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/desktop_window.o: src/desktop/desktop_window.c include/desktop/desktop_theme.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
