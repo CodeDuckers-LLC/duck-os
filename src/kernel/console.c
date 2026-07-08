@@ -10,6 +10,8 @@
 
 static spinlock_t console_lock;
 static unsigned int console_mode = CONSOLE_SINK_SERIAL;
+static console_output_capture_fn_t console_capture_callback;
+static void *console_capture_user_data;
 static int console_is_backspace(char c);
 
 typedef struct gfx_console_state
@@ -318,6 +320,12 @@ void console_init(void)
 
 void console_putc_unlocked(char c)
 {
+    if (console_capture_callback != 0)
+    {
+        console_capture_callback(c, console_capture_user_data);
+        return;
+    }
+
     if ((console_mode & CONSOLE_SINK_SERIAL) != 0U)
     {
         if (c == '\n')
@@ -521,4 +529,14 @@ void console_set_input_mode(unsigned int mode)
 unsigned int console_input_mode(void)
 {
     return input_mode();
+}
+
+void console_set_output_capture(console_output_capture_fn_t callback, void *user_data)
+{
+    unsigned long flags;
+
+    flags = spin_lock_irqsave(&console_lock);
+    console_capture_callback = callback;
+    console_capture_user_data = user_data;
+    spin_unlock_irqrestore(&console_lock, flags);
 }

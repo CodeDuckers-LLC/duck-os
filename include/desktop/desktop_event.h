@@ -10,6 +10,7 @@
 #define DESKTOP_EVENT_BUTTON_DOWN 4U
 #define DESKTOP_EVENT_BUTTON_UP 5U
 #define DESKTOP_EVENT_CURSOR_MOVE 6U
+#define DESKTOP_EVENT_WINDOW_CLOSE 7U
 
 typedef struct desktop_event
 {

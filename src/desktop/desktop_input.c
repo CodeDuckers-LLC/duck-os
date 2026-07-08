@@ -49,11 +49,6 @@ static int desktop_input_is_key_pressed(const input_event_t *input_event)
     return input_event->pressed == INPUT_KEY_PRESS || input_event->pressed == INPUT_KEY_REPEAT;
 }
 
-static int desktop_input_char_matches(char ch, char lower, char upper)
-{
-    return ch == lower || ch == upper;
-}
-
 static void desktop_clamp_cursor(unsigned int fb_width,
                                  unsigned int fb_height,
                                  unsigned int *cursor_x,
@@ -112,6 +107,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
                                  unsigned int *primary_button_down,
                                  desktop_event_t *event_out)
 {
+    char translated_char;
     unsigned int result;
     unsigned int index;
 
@@ -147,49 +143,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
             return DESKTOP_INPUT_RESULT_REDRAW;
         }
 
-        if (desktop_input_char_matches(input_event->data.character, 'a', 'A'))
-        {
-            if (*cursor_x > DESKTOP_CURSOR_STEP)
-            {
-                *cursor_x -= DESKTOP_CURSOR_STEP;
-            }
-            else
-            {
-                *cursor_x = 0U;
-            }
-            desktop_clamp_cursor(fb_width, fb_height, cursor_x, cursor_y);
-            event_out->type = DESKTOP_EVENT_CURSOR_MOVE;
-            result = DESKTOP_INPUT_RESULT_REDRAW;
-        }
-        else if (desktop_input_char_matches(input_event->data.character, 'd', 'D'))
-        {
-            *cursor_x += DESKTOP_CURSOR_STEP;
-            desktop_clamp_cursor(fb_width, fb_height, cursor_x, cursor_y);
-            event_out->type = DESKTOP_EVENT_CURSOR_MOVE;
-            result = DESKTOP_INPUT_RESULT_REDRAW;
-        }
-        else if (desktop_input_char_matches(input_event->data.character, 'w', 'W'))
-        {
-            if (*cursor_y > DESKTOP_CURSOR_STEP)
-            {
-                *cursor_y -= DESKTOP_CURSOR_STEP;
-            }
-            else
-            {
-                *cursor_y = 0U;
-            }
-            desktop_clamp_cursor(fb_width, fb_height, cursor_x, cursor_y);
-            event_out->type = DESKTOP_EVENT_CURSOR_MOVE;
-            result = DESKTOP_INPUT_RESULT_REDRAW;
-        }
-        else if (desktop_input_char_matches(input_event->data.character, 's', 'S'))
-        {
-            *cursor_y += DESKTOP_CURSOR_STEP;
-            desktop_clamp_cursor(fb_width, fb_height, cursor_x, cursor_y);
-            event_out->type = DESKTOP_EVENT_CURSOR_MOVE;
-            result = DESKTOP_INPUT_RESULT_REDRAW;
-        }
-        else if (input_event->data.character == '\n' || input_event->data.character == '\r')
+        if (input_event->data.character == '\n' || input_event->data.character == '\r')
         {
             index = desktop_find_topmost_window(windows, window_count, *cursor_x, *cursor_y);
             if (index < window_count)
@@ -247,6 +201,22 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         return DESKTOP_INPUT_RESULT_NONE;
     }
 
+    translated_char = '\0';
+    if (input_event->data.keycode != INPUT_KEY_MOUSE_LEFT &&
+        input_event->data.keycode != INPUT_KEY_TAB &&
+        input_event_to_char(input_event, &translated_char))
+    {
+        event_out->type = DESKTOP_EVENT_CHAR;
+        event_out->character = translated_char;
+        event_out->input = *input_event;
+        event_out->target_window_id = (*focused_window_index < window_count)
+                                          ? windows[*focused_window_index].id
+                                          : 0U;
+        event_out->cursor_x = *cursor_x;
+        event_out->cursor_y = *cursor_y;
+        return DESKTOP_INPUT_RESULT_REDRAW;
+    }
+
     if (input_event->data.keycode == INPUT_KEY_ENTER ||
         input_event->data.keycode == INPUT_KEY_MOUSE_LEFT)
     {
@@ -287,8 +257,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         event_out->cursor_y = *cursor_y;
         return DESKTOP_INPUT_RESULT_REDRAW;
     }
-    else if (input_event->data.keycode == INPUT_KEY_LEFT ||
-             input_event->data.keycode == INPUT_KEY_A)
+    else if (input_event->data.keycode == INPUT_KEY_LEFT)
     {
         if (*cursor_x > DESKTOP_CURSOR_STEP)
         {
@@ -300,14 +269,12 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         }
         result |= DESKTOP_INPUT_RESULT_REDRAW;
     }
-    else if (input_event->data.keycode == INPUT_KEY_RIGHT ||
-             input_event->data.keycode == INPUT_KEY_D)
+    else if (input_event->data.keycode == INPUT_KEY_RIGHT)
     {
         *cursor_x += DESKTOP_CURSOR_STEP;
         result |= DESKTOP_INPUT_RESULT_REDRAW;
     }
-    else if (input_event->data.keycode == INPUT_KEY_UP ||
-             input_event->data.keycode == INPUT_KEY_W)
+    else if (input_event->data.keycode == INPUT_KEY_UP)
     {
         if (*cursor_y > DESKTOP_CURSOR_STEP)
         {
@@ -319,8 +286,7 @@ unsigned int desktop_input_route(const input_event_t *input_event,
         }
         result |= DESKTOP_INPUT_RESULT_REDRAW;
     }
-    else if (input_event->data.keycode == INPUT_KEY_DOWN ||
-             input_event->data.keycode == INPUT_KEY_S)
+    else if (input_event->data.keycode == INPUT_KEY_DOWN)
     {
         *cursor_y += DESKTOP_CURSOR_STEP;
         result |= DESKTOP_INPUT_RESULT_REDRAW;

@@ -10,6 +10,27 @@
 #define DESKTOP_WINDOW_BODY_BG 0xffd9e4eaU
 #define DESKTOP_WINDOW_TITLE_HEIGHT (GFX_FONT_HEIGHT + 8)
 #define DESKTOP_WINDOW_PADDING 8
+#define DESKTOP_WINDOW_CONTROL_SIZE 12
+#define DESKTOP_WINDOW_CONTROL_GAP 4
+#define DESKTOP_WINDOW_CONTROL_MARGIN 6
+#define DESKTOP_WINDOW_CONTROL_CLOSE_BG 0xffd76464U
+#define DESKTOP_WINDOW_CONTROL_MINIMIZE_BG 0xffd8b45cU
+#define DESKTOP_WINDOW_CONTROL_MAXIMIZE_BG 0xff6db27aU
+
+static int desktop_window_control_x(const desktop_window_t *window, unsigned int control)
+{
+    int right;
+    int offset;
+
+    if (window == 0 || control == DESKTOP_WINDOW_CONTROL_NONE)
+    {
+        return 0;
+    }
+
+    right = window->x + (int)window->width - DESKTOP_WINDOW_CONTROL_MARGIN - DESKTOP_WINDOW_CONTROL_SIZE;
+    offset = (int)(control - 1U) * (DESKTOP_WINDOW_CONTROL_SIZE + DESKTOP_WINDOW_CONTROL_GAP);
+    return right - offset;
+}
 
 static int desktop_clip_dimension(int start, unsigned int size, unsigned int limit)
 {
@@ -69,10 +90,29 @@ void desktop_window_init(desktop_window_t *window,
     window->width = width;
     window->height = height;
     window->flags = DESKTOP_WINDOW_FLAG_VISIBLE;
+    window->restore_x = x;
+    window->restore_y = y;
+    window->restore_width = width;
+    window->restore_height = height;
     if (title != 0)
     {
         strlcpy(window->title, title, sizeof(window->title));
     }
+}
+
+void desktop_window_bind(desktop_window_t *window,
+                         desktop_window_draw_fn_t draw,
+                         desktop_window_event_fn_t handle_event,
+                         void *user_data)
+{
+    if (window == 0)
+    {
+        return;
+    }
+
+    window->draw = draw;
+    window->handle_event = handle_event;
+    window->user_data = user_data;
 }
 
 int desktop_window_is_visible(const desktop_window_t *window)
@@ -166,7 +206,43 @@ int desktop_window_title_hit_test(const desktop_window_t *window, unsigned int x
     }
 
     title_height = desktop_window_title_height();
-    return y < (unsigned int)(window->y + (int)title_height);
+    return y < (unsigned int)(window->y + (int)title_height) &&
+           desktop_window_control_hit_test(window, x, y) == DESKTOP_WINDOW_CONTROL_NONE;
+}
+
+unsigned int desktop_window_control_hit_test(const desktop_window_t *window, unsigned int x, unsigned int y)
+{
+    unsigned int control;
+    unsigned int title_height;
+
+    if (!desktop_window_contains_point(window, x, y))
+    {
+        return DESKTOP_WINDOW_CONTROL_NONE;
+    }
+
+    title_height = desktop_window_title_height();
+    if (y >= (unsigned int)(window->y + (int)title_height))
+    {
+        return DESKTOP_WINDOW_CONTROL_NONE;
+    }
+
+    for (control = DESKTOP_WINDOW_CONTROL_CLOSE; control <= DESKTOP_WINDOW_CONTROL_MAXIMIZE; control++)
+    {
+        int control_x;
+        int control_y;
+
+        control_x = desktop_window_control_x(window, control);
+        control_y = window->y + ((int)title_height - DESKTOP_WINDOW_CONTROL_SIZE) / 2;
+        if (x >= (unsigned int)control_x &&
+            x < (unsigned int)(control_x + DESKTOP_WINDOW_CONTROL_SIZE) &&
+            y >= (unsigned int)control_y &&
+            y < (unsigned int)(control_y + DESKTOP_WINDOW_CONTROL_SIZE))
+        {
+            return control;
+        }
+    }
+
+    return DESKTOP_WINDOW_CONTROL_NONE;
 }
 
 void desktop_window_clamp_to_screen(desktop_window_t *window, unsigned int screen_width, unsigned int screen_height)
@@ -240,4 +316,37 @@ void desktop_window_draw(const desktop_window_t *window, framebuffer_t *fb, int 
                     window->title,
                     DESKTOP_WINDOW_TITLE_FG,
                     title_bg);
+    {
+        unsigned int control;
+
+        for (control = DESKTOP_WINDOW_CONTROL_CLOSE; control <= DESKTOP_WINDOW_CONTROL_MAXIMIZE; control++)
+        {
+            int control_x;
+            int control_y;
+            unsigned int bg;
+            const char *label;
+
+            control_x = desktop_window_control_x(window, control);
+            control_y = window->y + (DESKTOP_WINDOW_TITLE_HEIGHT - DESKTOP_WINDOW_CONTROL_SIZE) / 2;
+            if (control == DESKTOP_WINDOW_CONTROL_CLOSE)
+            {
+                bg = DESKTOP_WINDOW_CONTROL_CLOSE_BG;
+                label = "X";
+            }
+            else if (control == DESKTOP_WINDOW_CONTROL_MINIMIZE)
+            {
+                bg = DESKTOP_WINDOW_CONTROL_MINIMIZE_BG;
+                label = "_";
+            }
+            else
+            {
+                bg = DESKTOP_WINDOW_CONTROL_MAXIMIZE_BG;
+                label = (window->flags & DESKTOP_WINDOW_FLAG_MAXIMIZED) != 0U ? "R" : "+";
+            }
+
+            draw_fill_rect(fb, control_x, control_y, DESKTOP_WINDOW_CONTROL_SIZE, DESKTOP_WINDOW_CONTROL_SIZE, bg);
+            draw_rect(fb, control_x, control_y, DESKTOP_WINDOW_CONTROL_SIZE, DESKTOP_WINDOW_CONTROL_SIZE, DESKTOP_WINDOW_BORDER_COLOR);
+            gfx_draw_string(fb, control_x + 3, control_y + 2, label, DESKTOP_WINDOW_TITLE_FG, bg);
+        }
+    }
 }

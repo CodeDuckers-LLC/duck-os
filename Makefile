@@ -30,10 +30,13 @@ OBJS := \
 	$(BUILD_DIR)/drivers/virtio_input.o \
 	$(BUILD_DIR)/drivers/virtio_mmio.o \
 	$(BUILD_DIR)/drivers/virtio_rng.o \
+	$(BUILD_DIR)/desktop/app_registry.o \
 	$(BUILD_DIR)/desktop/desktop.o \
-	$(BUILD_DIR)/desktop/desktop_app.o \
 	$(BUILD_DIR)/desktop/desktop_event.o \
 	$(BUILD_DIR)/desktop/desktop_input.o \
+	$(BUILD_DIR)/desktop/files_app.o \
+	$(BUILD_DIR)/desktop/terminal_app.o \
+	$(BUILD_DIR)/desktop/text_editor_app.o \
 	$(BUILD_DIR)/desktop/taskbar.o \
 	$(BUILD_DIR)/desktop/desktop_window.o \
 	$(BUILD_DIR)/fs/file.o \
@@ -59,6 +62,7 @@ OBJS := \
 	$(BUILD_DIR)/input/input.o \
 	$(BUILD_DIR)/kernel/memory_layout.o \
 	$(BUILD_DIR)/kernel/panic.o \
+	$(BUILD_DIR)/kernel/shell_core.o \
 	$(BUILD_DIR)/kernel/shell.o \
 	$(BUILD_DIR)/kernel/spinlock.o \
 	$(BUILD_DIR)/kernel/syscall.o \
@@ -148,11 +152,11 @@ $(BUILD_DIR)/drivers/virtio_rng.o: src/drivers/virtio_rng.c include/arch/aarch64
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/desktop.h include/desktop/desktop_app.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/taskbar.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/kernel/timer.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/app_registry.o: src/desktop/app_registry.c include/desktop/app_registry.h include/desktop/desktop.h include/desktop/files_app.h include/desktop/terminal_app.h include/desktop/text_editor_app.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/desktop_app.o: src/desktop/desktop_app.c include/desktop/desktop_app.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/desktop.o: src/desktop/desktop.c include/desktop/app_registry.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_input.h include/desktop/taskbar.h include/desktop/desktop_window.h include/arch/aarch64/cpu.h include/drivers/virtio_gpu.h include/gfx/cursor.h include/gfx/draw.h include/gfx/font.h include/kernel/console.h include/kernel/input.h include/kernel/timer.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -164,7 +168,19 @@ $(BUILD_DIR)/desktop/desktop_input.o: src/desktop/desktop_input.c include/deskto
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/desktop/taskbar.o: src/desktop/taskbar.c include/desktop/taskbar.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
+$(BUILD_DIR)/desktop/files_app.o: src/desktop/files_app.c include/desktop/files_app.h include/desktop/app_registry.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/fs/vfs.h include/gfx/draw.h include/gfx/font.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/terminal_app.o: src/desktop/terminal_app.c include/desktop/terminal_app.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/kernel/shell.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/text_editor_app.o: src/desktop/text_editor_app.c include/desktop/text_editor_app.h include/desktop/desktop.h include/desktop/desktop_event.h include/desktop/desktop_window.h include/fs/file.h include/gfx/draw.h include/gfx/font.h include/input/input.h include/lib/string.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/desktop/taskbar.o: src/desktop/taskbar.c include/desktop/app_registry.h include/desktop/taskbar.h include/desktop/desktop_window.h include/gfx/draw.h include/gfx/font.h include/lib/string.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -264,7 +280,11 @@ $(BUILD_DIR)/kernel/panic.o: src/kernel/panic.c include/arch/aarch64/cpu.h inclu
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/block/block_device.h include/desktop/desktop.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/gui/app_file_browser.h include/gui/app_text_viewer.h include/gui/gui.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/shell_core.o: src/kernel/shell_core.c include/block/block_device.h include/desktop/app_registry.h include/desktop/desktop.h include/drivers/pci.h include/drivers/virtio.h include/drivers/virtio_gpu.h include/drivers/virtio_rng.h include/fs/file.h include/fs/vfs.h include/gfx/framebuffer.h include/gui/app_file_browser.h include/gui/app_text_viewer.h include/gui/gui.h include/kernel/console.h include/kernel/input.h include/kernel/klog.h include/kernel/kmalloc.h include/kernel/memory_layout.h include/kernel/panic.h include/kernel/shell.h include/kernel/timer.h include/lib/string.h include/mm/pmm.h | $(BUILD_DIR)
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel/shell.o: src/kernel/shell.c include/kernel/console.h include/kernel/klog.h include/kernel/shell.h | $(BUILD_DIR)
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
